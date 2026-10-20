@@ -124,7 +124,11 @@ install_launchers() {
     mkdir -p "$BIN_DIR" "$APPLICATIONS_DIR" "$ICON_DIR"
     install -m 644 "$REPO_DIR/data/orintube.svg" "$ICON_DIR/orintube.svg"
     link_command orintube
-    sed "s|@BIN_DIR@|$BIN_DIR|" "$REPO_DIR/data/orintube.desktop.in" > "$APPLICATIONS_DIR/orintube.desktop"
+    # 2026-10-19 (user: "orin tube lost the icon ... its just a gear"): with Icon=orintube the
+    # dock kept showing a gear although GTK found the icon (GNOME Shell had not re-read its
+    # icon cache). A full path to the file always works.
+    sed -e "s|@BIN_DIR@|$BIN_DIR|" -e "s|@ICON_PATH@|$ICON_DIR/orintube.svg|" \
+        "$REPO_DIR/data/orintube.desktop.in" > "$APPLICATIONS_DIR/orintube.desktop"
     echo "Installed: the orintube command and OrinTube in the app grid."
 }
 
