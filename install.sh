@@ -23,7 +23,9 @@ REPO_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 readonly REPO_DIR
 readonly BIN_DIR="$HOME/.local/bin"
 readonly APPLICATIONS_DIR="$HOME/.local/share/applications"
-readonly ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
+readonly ICON_THEME_DIR="$HOME/.local/share/icons/hicolor"
+readonly ICON_DIR="$ICON_THEME_DIR/scalable/apps"
+readonly ICON_SIZES_PX="16 24 32 48 64 128 256 512"
 readonly DENO_DIR="$HOME/.deno/bin"
 readonly DENO_VERSION="v2.9.7"
 
@@ -109,6 +111,21 @@ ensure_deno() {
     fi
 }
 
+install_icons() {
+    # The SVG plus PNG renders at each size in ICON_SIZES_PX (pixels), like installed apps ship.
+    local size
+    mkdir -p "$ICON_DIR"
+    install -m 644 "$REPO_DIR/data/orintube.svg" "$ICON_DIR/orintube.svg"
+    for size in $ICON_SIZES_PX; do
+        mkdir -p "$ICON_THEME_DIR/${size}x${size}/apps"
+        python3 -c "import sys, gi; gi.require_version('GdkPixbuf', '2.0'); from gi.repository import GdkPixbuf; \
+GdkPixbuf.Pixbuf.new_from_file_at_size(sys.argv[1], int(sys.argv[2]), int(sys.argv[2])).savev(sys.argv[3], 'png', [], [])" \
+            "$REPO_DIR/data/orintube.svg" "$size" "$ICON_THEME_DIR/${size}x${size}/apps/orintube.png"
+    done
+    # Refresh the icon cache so the desktop sees the new pictures (harmless if it fails).
+    gtk-update-icon-cache -f -t "$ICON_THEME_DIR" >/dev/null 2>&1 || true
+}
+
 link_command() {
     # Link bin/<name> into BIN_DIR, keeping an existing regular file as <name>.bak.
     local name="$1" target="$BIN_DIR/$1"
@@ -122,12 +139,14 @@ link_command() {
 install_launchers() {
     # Commands in ~/.local/bin, the app icon, and the "OrinTube" app-grid entry.
     mkdir -p "$BIN_DIR" "$APPLICATIONS_DIR" "$ICON_DIR"
-    install -m 644 "$REPO_DIR/data/orintube.svg" "$ICON_DIR/orintube.svg"
+    install_icons
     link_command orintube
     # 2026-10-19 (user: "orin tube lost the icon ... its just a gear"): with Icon=orintube the
     # dock kept showing a gear although GTK found the icon (GNOME Shell had not re-read its
     # icon cache). A full path to the file always works.
-    sed -e "s|@BIN_DIR@|$BIN_DIR|" -e "s|@ICON_PATH@|$ICON_DIR/orintube.svg|" \
+    # 2026-10-19 (user: "i want a real icon in the start menu as well"): the app grid kept a
+    # cached gear; the launcher now points at the 256 px PNG render, a crisp size for the grid.
+    sed -e "s|@BIN_DIR@|$BIN_DIR|" -e "s|@ICON_PATH@|$ICON_THEME_DIR/256x256/apps/orintube.png|" \
         "$REPO_DIR/data/orintube.desktop.in" > "$APPLICATIONS_DIR/orintube.desktop"
     echo "Installed: the orintube command and OrinTube in the app grid."
 }

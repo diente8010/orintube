@@ -80,8 +80,9 @@ SECTIONS = [
 
 # 2026-10-19 (user: "i want the same GUI as the youtube app"): a dark theme laid out like
 # YouTube's: page #0f0f0f, raised surfaces #272727, text #f1f1f1, secondary text #aaaaaa.
-# The accent is amber #ffb020 (logo, seek bar), not YouTube's red, so the app is not
-# mistaken for an official YouTube product (renamed OrinTube the same day). LIVE stays red,
+# The accent is green #76b900 (logo, seek bar), not YouTube's red, so the app is not
+# mistaken for an official YouTube product (renamed OrinTube the same day; user: "the icon
+# should be nvidia green"). Only the colour: NVIDIA's logo and name are not used. LIVE stays red,
 # the usual colour for live badges everywhere.
 STYLE_SHEET = b"""
 window, .browse, .watch, list, flowbox, scrolledwindow, viewport { background-color: #0f0f0f; color: #f1f1f1; }
@@ -103,8 +104,8 @@ flowboxchild:hover { background: #1f1f1f; }
 .controls { background: #0f0f0f; padding: 2px 8px; }
 .controls button { background: none; border: none; box-shadow: none; color: #f1f1f1; }
 .seek-bar trough { min-height: 4px; background: rgba(255, 255, 255, 0.25); }
-.seek-bar highlight { background: #ffb020; }
-.seek-bar slider { background: #ffb020; min-width: 12px; min-height: 12px; border: none; }
+.seek-bar highlight { background: #76b900; }
+.seek-bar slider { background: #a4e44a; min-width: 12px; min-height: 12px; border: none; }
 .watch-title { font-size: 18px; font-weight: bold; }
 .error { color: #ff6b6b; }
 .up-next-header { font-weight: bold; font-size: 16px; }

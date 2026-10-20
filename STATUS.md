@@ -81,7 +81,7 @@ What changed and why, with the evidence:
 - User: "it doesnt let you see comments or make them": read-only Comments tab (top 40). Posting is
   left out on purpose (would need YouTube's private API with the browser cookies; ToS risk).
 - User: "please make sure that this doesnt get me in trouble": renamed OrinTube (was "YouTube
-  Viewer" with a red "▶ YouTube" logo), amber accent and own icon, README legal/privacy section,
+  Viewer" with a red "▶ YouTube" logo), own icon and accent (amber, then NVIDIA-style green #76b900 at the user's request), README legal/privacy section,
   MIT license, the user's name removed from code and history.
 - Verified headless: a live stream (CNN, 720p) and a Short (NASA, 1080x1920) decode on NVDEC.
   On screen: Shorts grid, a Short playing in its vertical frame, its comments.
@@ -89,6 +89,10 @@ What changed and why, with the evidence:
   system 45% busy, 0 dropped; OrinTube 0.5 of one core, system 26% busy, 60 fps. Decode only:
   H.264 NVDEC 42% vs FFmpeg 122% of one core; VP9 NVDEC 30% vs FFmpeg 114%.
 - Known risk: yt-dlp has deprecated Python 3.10 (JetPack 6's Python).
+
+- Icons (user: "orin tube lost the icon ... its just a gear", "i want a real icon in the start
+  menu as well"): new tile icon (screen, play button, progress bar), PNG renders 16-512 px plus
+  the SVG, launcher points at the 256 px PNG by full path (GNOME had kept a cached gear).
 
 ## Known limits
 - Videos that need the signed-in fallback take 12-16 s to start; after 4 s the app says so.

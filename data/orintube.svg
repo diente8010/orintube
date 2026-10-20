@@ -1,7 +1,28 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <rect x="8" y="8" width="112" height="112" rx="26" fill="#0f0f0f"/>
-  <rect x="8" y="8" width="112" height="112" rx="26" fill="none" stroke="#3a3a3a" stroke-width="3"/>
-  <path d="M50 38 L92 64 L50 90 Z" fill="#ffb020" stroke="#ffb020" stroke-width="8" stroke-linejoin="round"/>
-  <rect x="30" y="100" width="68" height="6" rx="3" fill="#3a3a3a"/>
-  <rect x="30" y="100" width="40" height="6" rx="3" fill="#ffb020"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b2f36"/>
+      <stop offset="1" stop-color="#0d0f12"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c2027"/>
+      <stop offset="1" stop-color="#101318"/>
+    </linearGradient>
+    <linearGradient id="play" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a4e44a"/>
+      <stop offset="1" stop-color="#5e9400"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="52" fill="url(#tile)"/>
+  <rect x="12" y="12" width="232" height="116" rx="52" fill="url(#shine)"/>
+  <rect x="13.5" y="13.5" width="229" height="229" rx="50.5" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="3"/>
+  <rect x="44" y="56" width="168" height="112" rx="18" fill="url(#screen)" stroke="#3a404a" stroke-width="4"/>
+  <path d="M110 84 L156 112 L110 140 Z" fill="url(#play)" stroke="url(#play)" stroke-width="14" stroke-linejoin="round"/>
+  <rect x="44" y="190" width="168" height="10" rx="5" fill="#3a404a"/>
+  <rect x="44" y="190" width="104" height="10" rx="5" fill="url(#play)"/>
+  <circle cx="148" cy="195" r="10" fill="#a4e44a" stroke="#0d0f12" stroke-width="3"/>
 </svg>
