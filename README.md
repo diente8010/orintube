@@ -1,3 +1,5 @@
+<p align="center"><img src="data/orintube.svg" width="128" alt="OrinTube icon"></p>
+
 # OrinTube
 
 **Smooth YouTube on NVIDIA Jetson, decoded by the board's video hardware instead of its ARM CPU.**
