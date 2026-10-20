@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=OrinTube
+Comment=Browse YouTube and play it with the Jetson hardware decoder
+Exec="@BIN_DIR@/orintube"
+Icon=orintube
+Terminal=false
+Categories=AudioVideo;Video;Player;
+StartupWMClass=orintube
+Keywords=youtube;video;jetson;

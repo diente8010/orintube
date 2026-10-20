@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# orintube: launches OrinTube from this repository.
+#
+# Run:  orintube [youtube-link] [--no-sign-in]      (see orintube/__main__.py)
+# install.sh links this file into ~/.local/bin, and the app-grid entry runs it.
+#
+# REPO_DIR: the repository folder, found from this file's real location, so the link in
+#   ~/.local/bin works wherever the repository was cloned.
+# PATH: apps started from the app grid do not always have ~/.local/bin in PATH; yt-dlp
+#   (pip --user) and the deno link live there.
+# PYTHONPATH: lets "python3 -m orintube" find the package in the repository.
+REPO_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+export PATH="$HOME/.local/bin:$PATH"
+export PYTHONPATH="$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m orintube "$@"
