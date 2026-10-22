@@ -50,6 +50,15 @@ class ChooseHlsFormatsTest(unittest.TestCase):
         video, _audio = choose_hls_formats(BIG_BUCK_BUNNY_FORMATS, 720)
         self.assertEqual(video["format_id"], "311")
 
+    def test_original_audio_beats_auto_dubbed_tracks(self):
+        # Trimmed from a Short in the user's History (2026-10-21): 40 dubbed tracks + the original.
+        dubbed = [dict(hls(f"{itag}-{n}", "none", note=f"{lang} - dubbed-auto"), language=lang)
+                  for itag in ("233", "234") for n, lang in enumerate(["ar", "de-DE", "ja", "ko", "es-US", "uk"])]
+        original = [dict(hls(f"{itag}-20", "none", note="American English - original (original)"),
+                         language="en-US", language_preference=10) for itag in ("233", "234")]
+        _video, audio = choose_hls_formats([BIG_BUCK_BUNNY_FORMATS[6]] + dubbed + original, 1080)
+        self.assertEqual(audio["format_id"], "234-20")
+
     def test_vertical_short_quality_is_its_shorter_side(self):
         formats = [dict(hls("299", "avc1.640028", 1920, 30, 4000), width=1080),
                    dict(hls("298", "avc1.4d401f", 1280, 30, 2500), width=720), BIG_BUCK_BUNNY_FORMATS[1]]

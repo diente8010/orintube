@@ -343,6 +343,21 @@ def quality_px(video_format):
     return height or 0
 
 
+def audio_language_rank(audio_format):
+    """Rank an audio track (yt-dlp format dict): higher is better. (is original, is English).
+
+    2026-10-21 (user: Shorts "come out in Japanese, even though they played in english on my
+    phone"): many videos now carry YouTube's auto-dubbed tracks. A Short from History had 42
+    HLS audio tracks: 40 "dubbed-auto" ones and 2 marked "American English - original
+    (original)" with language_preference 10. Comparing format ids as text picked "234-9"
+    (Japanese) over "234-20" (the original). The original track always comes first now.
+    """
+    note = str(audio_format.get("format_note") or "").lower()
+    is_original = (audio_format.get("language_preference") or 0) > 0 or "original" in note
+    is_english = str(audio_format.get("language") or "").lower().startswith("en")
+    return is_original, is_english
+
+
 def choose_muxed_hls_format(formats, max_height_px):
     """Pick the tallest HLS format with H.264 video AND AAC audio together, at or below max_height_px.
 
@@ -357,7 +372,7 @@ def choose_muxed_hls_format(formats, max_height_px):
     ]
     if not muxed:
         raise LookupError(f"no H.264 stream at or below {max_height_px}p for this video")
-    return max(muxed, key=lambda f: (quality_px(f), f.get("fps") or 0, f.get("tbr") or 0))
+    return max(muxed, key=lambda f: (quality_px(f), f.get("fps") or 0, audio_language_rank(f), f.get("tbr") or 0))
 
 
 def choose_hls_formats(formats, max_height_px):
@@ -379,8 +394,9 @@ def choose_hls_formats(formats, max_height_px):
     if not audios:
         raise LookupError("no audio stream for this video")
     best_video = max(videos, key=lambda f: (quality_px(f), f.get("fps") or 0, f.get("tbr") or 0))
-    # "Default, high" (itag 234) beats "Default, low" (233). Neither has a bitrate in the list.
-    best_audio = max(audios, key=lambda f: ("high" in str(f.get("format_note", "")).lower(), f.get("format_id", "")))
+    # The original-language track first (see audio_language_rank), then English, then
+    # "Default, high" (itag 234) over "Default, low" (233); neither has a bitrate in the list.
+    best_audio = max(audios, key=lambda f: (audio_language_rank(f), _is_high_quality_audio(f)))
     return best_video, best_audio
 
 
@@ -612,6 +628,11 @@ def _make_streams(video_id, info, video_format, audio_url):
         fps=video_format.get("fps") or 0,
         aspect=_aspect_of(video_format),
     )
+
+
+def _is_high_quality_audio(audio_format):
+    """True for YouTube's higher-bitrate HLS audio: itag 234 ("Default, high"), also as "234-<n>"."""
+    return audio_format.get("format_id", "").split("-")[0] == "234" or "high" in str(audio_format.get("format_note", "")).lower()
 
 
 def _aspect_of(video_format):

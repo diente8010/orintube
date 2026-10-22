@@ -94,6 +94,14 @@ What changed and why, with the evidence:
   menu as well"): new tile icon (screen, play button, progress bar), PNG renders 16-512 px plus
   the SVG, launcher points at the 256 px PNG by full path (GNOME had kept a cached gear).
 
+## 2026-10-21: original audio instead of auto-dubbed tracks
+- User: some Shorts from History "come out in Japanese, even though they played in english on my phone".
+- Cause: YouTube's auto-dubbed audio tracks. One Short had 42 HLS audio tracks (40 "dubbed-auto",
+  2 "American English - original"); format ids were compared as text, so "234-9" (Japanese) beat
+  "234-20" (original). Now the original track wins, then English, then the higher bitrate,
+  in both the signed-out and the signed-in (muxed, 132 formats in 22 languages) paths.
+- Checked on that Short: both paths now pick acont=original, lang=en-US. 26 unit tests pass.
+
 ## Known limits
 - Videos that need the signed-in fallback take 12-16 s to start; after 4 s the app says so.
 - If both tries fail, the watch page offers "Watch in Chromium".
