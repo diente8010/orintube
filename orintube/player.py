@@ -54,6 +54,8 @@ from gi.repository import Gdk, GdkPixbuf, GdkX11, GLib, Gst, GstVideo, Gtk  # no
 
 Gst.init(None)
 
+from .log import log  # noqa: E402
+
 NANOSECONDS_PER_SECOND = Gst.SECOND
 POSITION_POLL_INTERVAL_MS = 250
 STALL_TIMEOUT_S = 20
@@ -407,6 +409,7 @@ class VideoPlayer:
             return
         self._seconds_without_progress += POSITION_POLL_INTERVAL_MS / 1000
         if self._seconds_without_progress >= STALL_TIMEOUT_S:
+            log(f"player stalled at {self._last_position_s} s")
             self._finish(f"Playback stalled: no progress for {STALL_TIMEOUT_S} s (network?)")
 
     def _set_playing(self, is_playing):
@@ -446,7 +449,8 @@ class VideoPlayer:
 
     def _on_bus_error(self, _bus, message):
         """Bus: an element failed. Stop and report the error text."""
-        error, _debug = message.parse_error()
+        error, debug = message.parse_error()
+        log(f"player error from {message.src.get_name()}: {error.message} | {debug}")
         self._finish(error.message)
 
     def _on_bus_end_of_stream(self, _bus, _message):

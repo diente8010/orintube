@@ -42,6 +42,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
+from .log import LOG_FILE, log  # noqa: E402
 from .player import VideoPlayer  # noqa: E402
 from .settings import load_settings, save_settings  # noqa: E402
 from .thumbnails import ThumbnailLoader  # noqa: E402
@@ -73,6 +74,13 @@ NOTICE_DURATION_S = 2
 # then kept; going Back showed the same grid, and a window open for days showed days-old lists
 # (YouTube itself returned the previous night's games). Now Back reloads a list older than this.
 STALE_LISTING_S = 10 * 60
+# 2026-10-23 (user: "the player is also saying internal data stream error"): 14 feed videos and
+# live streams all played in a sweep (muxed_sweep.py), so the error comes with time: YouTube's
+# stream links expire after some hours (a long pause), a live stream's paused-at segments
+# disappear, or a segment download fails. Like YouTube's own player, OrinTube then fetches
+# fresh links and continues at the same spot, up to MAX_RECOVERIES times in a row.
+MAX_RECOVERIES = 2
+RECOVERY_RESET_S = 30  # seconds of good playback after a recovery before retries are allowed again
 CONTROLS_HIDE_DELAY_S = 3
 SLOW_LOAD_NOTICE_S = 4
 # Load more videos when the grid is scrolled to within this many pixels of the bottom.
@@ -299,6 +307,10 @@ class ViewerWindow(Gtk.Window):
         self.user_is_dragging_seek_bar = False
         self.resume_position_s = None
         self.watch_history = []
+        self.last_position_s = None
+        self.recoveries = 0
+        self.recovered_at_s = None
+        self.current_is_live = False
 
         self._build_header_bar()
         self.pages = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, transition_duration=120)
@@ -815,13 +827,18 @@ class ViewerWindow(Gtk.Window):
         self.play_item(VideoItem(video_id=video_id, title="Loading…", channel=""), [],
                        resume_at_s=extract_start_time_s(url))
 
-    def play_item(self, item, source_items, resume_at_s=None):
+    def play_item(self, item, source_items, resume_at_s=None, is_recovery=False):
         """Open the watch page and start `item` (VideoItem).
 
         source_items: the list it was picked from. Up next shows it until YouTube's related
             videos arrive (about 1 s), and keeps showing it if they cannot be loaded.
         resume_at_s: start this many seconds in (quality change, or a link's t=), or None.
+        is_recovery: True when reconnecting after a stream error (keeps the retry count).
         """
+        if not is_recovery:
+            self.recoveries = 0
+            self.recovered_at_s = None
+        self.last_position_s = None
         # 2026-10-19 review: the previous video kept playing under the new title while the new
         # one resolved (up to 16 s), and its end could autoplay a different video. A pending
         # seek-bar seek would also have landed on the new video.
@@ -908,6 +925,7 @@ class ViewerWindow(Gtk.Window):
             self.show_watch_error(str(error))
             return False
         self.seek_bar.set_visible(not streams.is_live)
+        self.current_is_live = streams.is_live
         if self.resume_position_s:
             GLib.timeout_add(1000, self._seek_after_start, generation, self.resume_position_s)
         if self.is_fullscreen:
@@ -971,6 +989,10 @@ class ViewerWindow(Gtk.Window):
 
     def on_player_progress(self, position_s, duration_s):
         """Player: update the time label and seek bar (unless the user is dragging it)."""
+        if position_s is not None:
+            self.last_position_s = position_s
+            if self.recovered_at_s is not None and position_s - self.recovered_at_s > RECOVERY_RESET_S:
+                self.recoveries, self.recovered_at_s = 0, None
         if position_s is None or time.monotonic() < self.notice_until:
             return
         if duration_s is None:
@@ -987,14 +1009,28 @@ class ViewerWindow(Gtk.Window):
         self.play_button.set_image(Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.LARGE_TOOLBAR))
 
     def on_player_finished(self, error_text):
-        """Player: the video ended or failed. Autoplay the next one, or show the error."""
+        """Player: the video ended or failed. Autoplay the next one, reconnect, or show the error."""
         if error_text:
-            self.show_watch_error(error_text)
+            if self.current_item is not None and self.recoveries < MAX_RECOVERIES:
+                self.recover_playback(error_text)
+                return
+            log(f"giving up on {self.current_item.video_id if self.current_item else '?'} after {self.recoveries} reconnects: {error_text}")
+            self.show_watch_error(f"{error_text}\nThe stream kept failing. Try again, or check the network. (Details: {LOG_FILE})")
             return
         if self.autoplay_switch.get_active() and self.up_next_items:
             self.play_next()
         else:
             self.time_label.set_text("Finished")
+
+    def recover_playback(self, error_text):
+        """Fetch fresh stream links for the current video and continue where it stopped."""
+        self.recoveries += 1
+        resume_at_s = None if self.current_is_live else self.last_position_s  # live: rejoin at the live point
+        log(f"reconnect {self.recoveries}/{MAX_RECOVERIES} for {self.current_item.video_id} at {resume_at_s} s after: {error_text}")
+        self.recovered_at_s = resume_at_s or 0.0
+        self.play_item(self.current_item, [self.current_item] + self.up_next_items,
+                       resume_at_s=resume_at_s, is_recovery=True)
+        self.show_notice("Stream interrupted, reconnecting…")
 
     # Seek bar
 

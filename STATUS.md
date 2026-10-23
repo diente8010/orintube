@@ -131,6 +131,19 @@ What changed and why, with the evidence:
   the channel list behind Shorts is re-read hourly. refresh_check.py: Refresh reloads, Back to a
   fresh list does not, Back to an 11-minute-old list does.
 
+## 2026-10-23: automatic reconnect, log file
+- User: "was ubuntu error caused by the player" / "the player is also saying internal data stream error".
+- The Ubuntu "System program problem detected" dialog came from /var/crash/_usr_bin_python3.10.1000.crash:
+  embed_test.py segfaulting on 2026-10-19 21:12 (before the prepare-window-handle fix), not from
+  OrinTube in use. The user can delete the file to stop the dialog.
+- The journal showed many "Sign in to confirm you're not a bot" answers to the signed-out lookup,
+  so most videos now use the signed-in muxed path; muxed_sweep.py played 14 feed videos (8 VOD,
+  6 live) without error, so the error is time-related (expired links, live window, network).
+- New: on a stream error or stall the app fetches fresh links and resumes at the last position
+  (live: at the live point), up to 2 times in a row (reset after 30 s of good playback), then shows
+  a message. orintube/log.py writes ~/.cache/orintube/orintube.log (GStreamer debug detail, lookup
+  failures, reconnects). recover_check.py: injected errors 1 and 2 recovered at ~2:00, error 3 gave up.
+
 ## Known limits
 - Videos that need the signed-in fallback take 12-16 s to start; after 4 s the app says so.
 - If both tries fail, the watch page offers "Watch in Chromium".

@@ -73,6 +73,8 @@ from dataclasses import dataclass
 
 import yt_dlp
 
+from .log import log
+
 
 
 @dataclass(frozen=True)
@@ -538,6 +540,7 @@ class YouTube:
         try:
             return self._get_separate_streams(video_id, max_height_px)
         except Exception as signed_out_error:  # LookupError (no HLS) or any yt-dlp error
+            log(f"{video_id}: signed-out lookup failed: {str(signed_out_error)[:200]}")
             if not self.use_sign_in or not still_wanted():
                 raise
             try:

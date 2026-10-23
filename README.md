@@ -152,6 +152,13 @@ OrinTube is provided "as is", without warranty (see [LICENSE](LICENSE)).
 OrinTube builds on [yt-dlp](https://github.com/yt-dlp/yt-dlp) (Unlicense), which is installed
 separately and not included in this repository.
 
+## When something goes wrong
+
+- If the stream breaks while watching (expired links after a long pause, a dropped
+  connection), OrinTube fetches fresh links and continues where it was, up to twice in a row.
+- Details of every failure are logged to `~/.cache/orintube/orintube.log`. Include it when
+  reporting a problem.
+
 ## Tests
 
 ```bash
