@@ -78,6 +78,7 @@ The decoders on their own (decode only, no display, same stream, CPU time per se
 | Shift+N / Shift+P | next / previous video |
 | Esc | leave fullscreen, then back to the grid |
 | / | search box |
+| F5 or Ctrl+R | refresh the list (it also refreshes itself when you come back after 10 minutes) |
 
 ## Install
 

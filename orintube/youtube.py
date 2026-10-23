@@ -66,6 +66,7 @@ import json
 import os
 import re
 import threading
+import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -119,6 +120,7 @@ COMMENT_COUNT = 40
 SHORTS_CHANNELS_PER_PAGE = 12
 SHORTS_PER_CHANNEL = 5
 SHORTS_TAB_URL = "https://www.youtube.com/channel/{channel_id}/shorts"
+SHORTS_CHANNELS_MAX_AGE_S = 60 * 60  # re-read which channels to show Shorts from, hourly
 THUMBNAIL_URL = "https://i.ytimg.com/vi/{video_id}/mqdefault.jpg"
 # 2026-10-19: the portrait URL that Shorts tabs list is WebP, and GdkPixbuf here has no WebP
 # loader (blank Shorts cards). oar2.jpg is the same cover as a 1080x1920 JPEG.
@@ -415,6 +417,7 @@ class YouTube:
         self._signed_in_stream_client = None
         self._signed_in_stream_lock = threading.Lock()
         self._shorts_channels = None
+        self._shorts_channels_read_at = 0.0
 
     # Signed-in feeds
 
@@ -494,7 +497,7 @@ class YouTube:
 
     def _get_shorts_channels(self):
         """The (channel id, channel name) pairs seen in the Subscriptions feed, in feed order (cached)."""
-        if self._shorts_channels is None:
+        if self._shorts_channels is None or time.monotonic() - self._shorts_channels_read_at > SHORTS_CHANNELS_MAX_AGE_S:
             with self._signed_in_lock:
                 client = self._get_signed_in_client()
                 client.params["playliststart"] = 1
@@ -506,6 +509,7 @@ class YouTube:
                 if channel_id and channel_id not in channels:
                     channels[channel_id] = entry.get("channel") or entry.get("uploader") or ""
             self._shorts_channels = list(channels.items())
+            self._shorts_channels_read_at = time.monotonic()
         return self._shorts_channels
 
     # Anonymous: search and streams

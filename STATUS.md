@@ -123,6 +123,14 @@ What changed and why, with the evidence:
   saved in ~/.config/orintube/settings.json (new orintube/settings.py). Verified: +500 ms
   moves audio 500 ms later, video unchanged. This Jetson starts at +500 (the user's estimate).
 
+## 2026-10-22: lists stay current
+- User: "the player isnt giving me recent results". YouTube was returning fresh data (the
+  Subscriptions feed led with that day's live news, a search gave the previous night's games); the app
+  showed a list loaded once and kept: Back re-showed the old grid, and the open window was days old.
+- Now: a Refresh button (and F5 / Ctrl+R); Back or Escape reloads a list older than 10 minutes;
+  the channel list behind Shorts is re-read hourly. refresh_check.py: Refresh reloads, Back to a
+  fresh list does not, Back to an 11-minute-old list does.
+
 ## Known limits
 - Videos that need the signed-in fallback take 12-16 s to start; after 4 s the app says so.
 - If both tries fail, the watch page offers "Watch in Chromium".

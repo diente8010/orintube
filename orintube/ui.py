@@ -22,6 +22,7 @@ Keyboard (watch page, while the search box does not have focus):
     [ / ]       sound 50 ms earlier / later (saved; for TVs that delay the picture)
     Escape      leave fullscreen, then back to browse
     /           jump to the search box
+    F5, Ctrl+R  refresh the list (also automatic when coming Back to a list older than 10 min)
 Mouse: click the video to pause, double-click for fullscreen. In fullscreen, the
 control bar and pointer hide after CONTROLS_HIDE_DELAY_S seconds without movement.
 
@@ -68,6 +69,10 @@ SEEK_BAR_DEBOUNCE_MS = 200
 AUDIO_DELAY_STEP_MS = 50
 AUDIO_DELAY_LIMIT_MS = 3000
 NOTICE_DURATION_S = 2
+# 2026-10-22 (user: "the player isnt giving me recent results"): a section was loaded once and
+# then kept; going Back showed the same grid, and a window open for days showed days-old lists
+# (YouTube itself returned the previous night's games). Now Back reloads a list older than this.
+STALE_LISTING_S = 10 * 60
 CONTROLS_HIDE_DELAY_S = 3
 SLOW_LOAD_NOTICE_S = 4
 # Load more videos when the grid is scrolled to within this many pixels of the bottom.
@@ -279,6 +284,7 @@ class ViewerWindow(Gtk.Window):
         self.search_query = None
         self.listed_items = []
         self.browse_generation = 0
+        self.listing_loaded_at = time.monotonic()
         self.is_loading_more = False
         self.has_more = True
         self.signed_in = False
@@ -335,7 +341,7 @@ class ViewerWindow(Gtk.Window):
 
         self.back_button = Gtk.Button.new_from_icon_name("go-previous-symbolic", Gtk.IconSize.BUTTON)
         self.back_button.set_tooltip_text("Back to videos (Escape)")
-        self.back_button.connect("clicked", lambda _button: self.show_browse_page())
+        self.back_button.connect("clicked", lambda _button: self.show_browse_page(refresh_if_stale=True))
         self.header.pack_start(self.back_button)
 
         logo = Gtk.Box(spacing=6)
@@ -353,6 +359,10 @@ class ViewerWindow(Gtk.Window):
         self.header.set_custom_title(self.search_entry)
 
         self.header.pack_end(self._build_account_menu())
+        refresh_button = Gtk.Button.new_from_icon_name("view-refresh-symbolic", Gtk.IconSize.BUTTON)
+        refresh_button.set_tooltip_text("Refresh (F5)")
+        refresh_button.connect("clicked", lambda _button: self.refresh_listing())
+        self.header.pack_end(refresh_button)
 
     def _build_account_menu(self):
         """Account button with a popover: sign-in status, "Sign in with <browser>…", "Refresh sign-in"."""
@@ -696,6 +706,7 @@ class ViewerWindow(Gtk.Window):
     def _start_listing(self, title):
         """Clear the grid, set the section title and load the first page in the background."""
         self.browse_generation += 1
+        self.listing_loaded_at = time.monotonic()
         self.listed_items = []
         self.pages_loaded = 0
         self.has_more = True
@@ -772,14 +783,27 @@ class ViewerWindow(Gtk.Window):
         if distance_to_bottom < LOAD_MORE_MARGIN_PX:
             self._load_next_page()
 
-    def show_browse_page(self):
-        """Stop the video, leave fullscreen and go back to the grid."""
+    def show_browse_page(self, refresh_if_stale=False):
+        """Stop the video, leave fullscreen and go back to the grid.
+
+        refresh_if_stale: reload the list when it is older than STALE_LISTING_S (used by Back/Escape).
+        """
         self.watch_generation += 1
         self.player.stop()
         if self.is_fullscreen:
             self.unfullscreen()
         self.pages.set_visible_child_name("browse")
         self.back_button.hide()
+        if refresh_if_stale and time.monotonic() - self.listing_loaded_at > STALE_LISTING_S:
+            self.refresh_listing()
+
+    def refresh_listing(self):
+        """Reload the current section or search from the start (Refresh button, F5, Ctrl+R)."""
+        if self.search_query is not None:
+            self.show_browse_page()
+            self._start_listing(self.section_title.get_text())
+        elif self.signed_in:
+            self.open_section(self.section_id)
 
     # Watching
 
@@ -1082,6 +1106,10 @@ class ViewerWindow(Gtk.Window):
         if event.keyval == Gdk.KEY_slash:
             self.search_entry.grab_focus()
             return True
+        control_pressed = bool(event.state & Gdk.ModifierType.CONTROL_MASK)
+        if event.keyval == Gdk.KEY_F5 or (control_pressed and event.keyval == Gdk.KEY_r):
+            self.refresh_listing()
+            return True
         if self.pages.get_visible_child_name() != "watch":
             return False
         handled = self._handle_watch_key(event.keyval)
@@ -1142,7 +1170,7 @@ class ViewerWindow(Gtk.Window):
         if self.is_fullscreen:
             self.unfullscreen()
         else:
-            self.show_browse_page()
+            self.show_browse_page(refresh_if_stale=True)
 
     def on_destroy(self, _window):
         """Window closed: stop the video, drop pending thumbnail downloads and quit."""
