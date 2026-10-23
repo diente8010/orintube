@@ -102,6 +102,18 @@ What changed and why, with the evidence:
   in both the signed-out and the signed-in (muxed, 132 formats in 22 languages) paths.
 - Checked on that Short: both paths now pick acont=original, lang=en-US. 26 unit tests pass.
 
+## 2026-10-22: paused frame stays on screen
+- User: "when i ever i pause a video, the screen goes black instead of freezing the image".
+- Cause: any redraw while paused painted the video area black (the draw handler did), and
+  nv3dsink does not repaint a paused frame (with or without enable-last-sample).
+  Test: brightness 235 paused -> 0 after a redraw.
+- Fix: the video area is painted black only until the first frame arrives (window
+  background None, app-paintable), so a redraw keeps the frame (235 -> 235). For a resize or
+  fullscreen while paused, the player copies the paused frame from the screen 150 ms after
+  pausing and paints it scaled. Re-showing it with a flushing seek while paused was tried
+  and hung the player, so it is not used.
+- pause_app.py: paused, fullscreen, back and resume all keep the picture; player_check.py 7/7.
+
 ## Known limits
 - Videos that need the signed-in fallback take 12-16 s to start; after 4 s the app says so.
 - If both tries fail, the watch page offers "Watch in Chromium".

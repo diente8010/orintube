@@ -48,13 +48,16 @@ gi.require_version("Gst", "1.0")
 gi.require_version("GstVideo", "1.0")
 gi.require_version("Gtk", "3.0")
 gi.require_version("GdkX11", "3.0")
-from gi.repository import GdkX11, GLib, Gst, GstVideo, Gtk  # noqa: E402,F401  (GdkX11 provides get_xid)
+gi.require_version("Gdk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gdk, GdkPixbuf, GdkX11, GLib, Gst, GstVideo, Gtk  # noqa: E402,F401  (GdkX11 provides get_xid)
 
 Gst.init(None)
 
 NANOSECONDS_PER_SECOND = Gst.SECOND
 POSITION_POLL_INTERVAL_MS = 250
 STALL_TIMEOUT_S = 20
+SNAPSHOT_DELAY_MS = 150  # after pausing, wait for the last frame to be on screen before copying it
 SHUTDOWN_TIMEOUT_S = 3
 
 # 2026-10-19: num-extra-surfaces=6 and enable-last-sample=false fix a seek deadlock.
@@ -128,6 +131,10 @@ class VideoPlayer:
         if video_area.get_realized():
             raise RuntimeError("VideoPlayer must be created before the video widget is shown")
         video_area.set_visual(video_area.get_screen().get_system_visual())
+        # Drawing in the widget is done by this class only (see _on_video_area_draw).
+        video_area.set_app_paintable(True)
+        self._showing_frame = False
+        self._paused_snapshot = None
         video_area.connect("size-allocate", self._on_video_area_resized)
         video_area.connect("draw", self._on_video_area_draw)
 
@@ -153,7 +160,11 @@ class VideoPlayer:
         # own that moves and resizes with it.
         if not gdk_window.ensure_native():
             raise RuntimeError("video area could not get its own X window")
+        # No background: X must not clear the window on expose, or a paused frame is wiped.
+        gdk_window.set_background_pattern(None)
         window_id = gdk_window.get_xid()
+        self._showing_frame = False
+        self._paused_snapshot = None
 
         try:
             pipeline = Gst.parse_launch(PIPELINE_DESCRIPTION if audio_url else MUXED_PIPELINE_DESCRIPTION)
@@ -310,6 +321,7 @@ class VideoPlayer:
         width_px, height_px = self._area_size_px  # GTK must not be called from this thread
         video_sink.set_render_rectangle(0, 0, width_px, height_px)
         self._video_sink_ready = True
+        video_sink.get_static_pad("sink").add_probe(Gst.PadProbeType.BUFFER, self._on_first_frame)
 
     def _on_video_area_resized(self, _widget, allocation):
         """Keep the video filling the widget when the window is resized or goes fullscreen.
@@ -323,17 +335,40 @@ class VideoPlayer:
             return
         self._control_thread.submit(self._redraw_in_control_thread, self.pipeline.get_by_name("video_sink"),
                                     allocation.width, allocation.height)
+        if self._paused_snapshot is not None:
+            self.video_area.queue_draw()  # repaint the paused frame at the new size
 
     def _redraw_in_control_thread(self, video_sink, width_px, height_px):
         """Control thread: tell nv3dsink the new widget size and redraw the last frame (expose can block)."""
         video_sink.set_render_rectangle(0, 0, width_px, height_px)
         video_sink.expose()
 
+    def _on_first_frame(self, _pad, _info):
+        """Streaming thread, once per video: the first frame reached nv3dsink, so stop painting black."""
+        self._showing_frame = True
+        return Gst.PadProbeReturn.REMOVE
+
     def _on_video_area_draw(self, _widget, cairo_context):
-        """Paint the video widget black, so it is black (not grey) before the first frame arrives."""
+        """Paint the widget black until the first frame arrives; after that, never paint over the video.
+
+        2026-10-22 (user: "when i ever i pause a video, the screen goes black instead of freezing
+        the image like a normal player would"): pausing kept the frame, but any redraw while
+        paused (pause_black.py: queue_draw 2 s after pausing) took the video area from brightness
+        235 to 0, because this handler painted black and nv3dsink does not repaint a paused frame,
+        with or without enable-last-sample. Not painting (plus no window background) kept 235.
+        """
+        if self._paused_snapshot is not None and not self._is_playing:
+            allocation = self.video_area.get_allocation()
+            scaled = self._paused_snapshot.scale_simple(max(1, allocation.width), max(1, allocation.height),
+                                                        GdkPixbuf.InterpType.BILINEAR)
+            Gdk.cairo_set_source_pixbuf(cairo_context, scaled, 0, 0)
+            cairo_context.paint()
+            return True
+        if self._showing_frame:
+            return True
         cairo_context.set_source_rgb(0, 0, 0)
         cairo_context.paint()
-        return False
+        return True
 
     def _poll_position(self):
         """Timer (every POSITION_POLL_INTERVAL_MS): report progress and watch for stalls."""
@@ -360,6 +395,28 @@ class VideoPlayer:
         if is_playing != self._is_playing:
             self._is_playing = is_playing
             self.on_state(is_playing)
+        if is_playing:
+            self._paused_snapshot = None
+        elif self.pipeline is not None and self._showing_frame:
+            GLib.timeout_add(SNAPSHOT_DELAY_MS, self._take_paused_snapshot)
+
+    def _take_paused_snapshot(self):
+        """Timer, just after pausing: copy the frame shown on screen, to repaint it while paused.
+
+        2026-10-22 (user: pausing turned the screen black): nv3dsink does not redraw a paused
+        frame, so a resize or fullscreen while paused showed black or old screen contents. A
+        flushing seek while paused, to make GStreamer draw the frame again, hung the player
+        (pause_app.py: the position stayed at 64.78 s after resuming). Copying the pixels
+        from the screen and painting them with cairo needs no GStreamer call at all.
+        """
+        gdk_window = self.video_area.get_window()
+        if self.pipeline is None or self._is_playing or gdk_window is None:
+            return False
+        allocation = self.video_area.get_allocation()
+        _found, x, y = gdk_window.get_origin()
+        self._paused_snapshot = Gdk.pixbuf_get_from_window(Gdk.get_default_root_window(), x, y,
+                                                           allocation.width, allocation.height)
+        return False
 
     def _on_bus_state_changed(self, _bus, message):
         """Bus: track the whole pipeline's PLAYING/PAUSED state (messages from single elements are ignored)."""
