@@ -19,6 +19,7 @@ Keyboard (watch page, while the search box does not have focus):
     Up / Down   volume +/- 5%         M           mute
     Shift+N     next video            Shift+P     previous video
     0-9         jump to 0%-90%        Home        back to the start
+    [ / ]       sound 50 ms earlier / later (saved; for TVs that delay the picture)
     Escape      leave fullscreen, then back to browse
     /           jump to the search box
 Mouse: click the video to pause, double-click for fullscreen. In fullscreen, the
@@ -32,6 +33,7 @@ What can go wrong:
 
 import subprocess
 import threading
+import time
 
 import gi
 
@@ -40,6 +42,7 @@ gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from .player import VideoPlayer  # noqa: E402
+from .settings import load_settings, save_settings  # noqa: E402
 from .thumbnails import ThumbnailLoader  # noqa: E402
 from .youtube import SignInError, VideoItem, YouTube, extract_start_time_s, extract_video_id  # noqa: E402
 
@@ -62,6 +65,9 @@ SEEK_SMALL_S = 5
 SEEK_LARGE_S = 10
 VOLUME_STEP = 0.05
 SEEK_BAR_DEBOUNCE_MS = 200
+AUDIO_DELAY_STEP_MS = 50
+AUDIO_DELAY_LIMIT_MS = 3000
+NOTICE_DURATION_S = 2
 CONTROLS_HIDE_DELAY_S = 3
 SLOW_LOAD_NOTICE_S = 4
 # Load more videos when the grid is scrolled to within this many pixels of the bottom.
@@ -295,6 +301,9 @@ class ViewerWindow(Gtk.Window):
         self.add(self.pages)
 
         self.player = VideoPlayer(self.video_area, self.on_player_progress, self.on_player_state, self.on_player_finished)
+        self.settings = load_settings()
+        self.player.set_audio_delay(self.settings["audio_delay_ms"])
+        self.notice_until = 0.0  # monotonic seconds; the time label shows a notice until then
         self.connect("key-press-event", self.on_key_press)
         self.connect("window-state-event", self.on_window_state_changed)
         self.connect("destroy", self.on_destroy)
@@ -938,7 +947,7 @@ class ViewerWindow(Gtk.Window):
 
     def on_player_progress(self, position_s, duration_s):
         """Player: update the time label and seek bar (unless the user is dragging it)."""
-        if position_s is None:
+        if position_s is None or time.monotonic() < self.notice_until:
             return
         if duration_s is None:
             self.time_label.set_text(f"● LIVE  {format_duration(position_s)}")
@@ -1096,6 +1105,8 @@ class ViewerWindow(Gtk.Window):
             Gdk.KEY_N: self.play_next,
             Gdk.KEY_P: self.play_previous,
             Gdk.KEY_Home: lambda: self.player.seek_to(0),
+            Gdk.KEY_bracketleft: lambda: self.change_audio_delay(-AUDIO_DELAY_STEP_MS),
+            Gdk.KEY_bracketright: lambda: self.change_audio_delay(AUDIO_DELAY_STEP_MS),
             Gdk.KEY_Escape: self._escape,
         }
         # Keys 0-9 jump to 0%-90% of the video, as on YouTube.
@@ -1106,6 +1117,19 @@ class ViewerWindow(Gtk.Window):
             return False
         action()
         return True
+
+    def change_audio_delay(self, step_ms):
+        """[ / ]: move the sound earlier or later by step_ms, save it, and show the new value for a moment."""
+        delay_ms = max(-AUDIO_DELAY_LIMIT_MS, min(AUDIO_DELAY_LIMIT_MS, self.player.audio_delay_ms + step_ms))
+        self.player.set_audio_delay(delay_ms)
+        self.settings["audio_delay_ms"] = delay_ms
+        save_settings(self.settings)
+        self.show_notice(f"Audio delay: {delay_ms:+d} ms" if delay_ms else "Audio delay: off")
+
+    def show_notice(self, text):
+        """Show `text` in the time label for NOTICE_DURATION_S seconds."""
+        self.time_label.set_text(text)
+        self.notice_until = time.monotonic() + NOTICE_DURATION_S
 
     def _seek_to_fraction(self, fraction):
         """Jump to `fraction` (0.0-1.0) of the video's length. Does nothing for live streams."""

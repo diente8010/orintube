@@ -114,6 +114,15 @@ What changed and why, with the evidence:
   and hung the player, so it is not used.
 - pause_app.py: paused, fullscreen, back and resume all keep the picture; player_check.py 7/7.
 
+## 2026-10-22: audio delay setting
+- User: "the audio is about a half second faster than the video".
+- Measured inside GStreamer (av_lateness.py): video and audio reach their sinks 16 and 23 ms
+  before their play time, i.e. in sync; PulseAudio buffer 190 ms matches alsasink's 200 ms.
+  Sound and picture both go to the display (DP, 1360x768) whose picture processing is the
+  likely delay. So, like VLC/mpv: [ and ] shift the sound in 50 ms steps (alsasink ts-offset),
+  saved in ~/.config/orintube/settings.json (new orintube/settings.py). Verified: +500 ms
+  moves audio 500 ms later, video unchanged. This Jetson starts at +500 (the user's estimate).
+
 ## Known limits
 - Videos that need the signed-in fallback take 12-16 s to start; after 4 s the app says so.
 - If both tries fail, the watch page offers "Watch in Chromium".

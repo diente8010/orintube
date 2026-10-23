@@ -13,6 +13,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
+from orintube.settings import load_settings, save_settings  # noqa: E402
 from orintube.ui import format_duration, format_views, secondary_line  # noqa: E402
 from orintube.youtube import (  # noqa: E402
     KNOWN_BROWSERS, VideoItem, choose_hls_formats, choose_muxed_hls_format, entry_to_video_item,
@@ -184,6 +185,25 @@ class EntryToVideoItemTest(unittest.TestCase):
     def test_channels_and_playlists_are_skipped(self):
         self.assertIsNone(entry_to_video_item({"id": "UCabcdefghijklmnopqrstuv", "title": "A channel"}))
         self.assertIsNone(entry_to_video_item({"title": "no id"}))
+
+
+class SettingsTest(unittest.TestCase):
+    def test_round_trip_and_defaults(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "sub", "settings.json")
+            self.assertEqual(load_settings(path), {"audio_delay_ms": 0})  # no file yet
+            save_settings({"audio_delay_ms": 500}, path)
+            self.assertEqual(load_settings(path), {"audio_delay_ms": 500})
+
+    def test_broken_file_and_unknown_keys_are_ignored(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "settings.json")
+            with open(path, "w") as broken:
+                broken.write("{not json")
+            self.assertEqual(load_settings(path), {"audio_delay_ms": 0})
+            with open(path, "w") as extra:
+                extra.write('{"audio_delay_ms": -150, "something_else": 1}')
+            self.assertEqual(load_settings(path), {"audio_delay_ms": -150})
 
 
 class StartTimeTest(unittest.TestCase):

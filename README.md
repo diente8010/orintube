@@ -74,6 +74,7 @@ The decoders on their own (decode only, no display, same stream, CPU time per se
 | Home | back to the start |
 | ↑ / ↓ | volume |
 | M | mute |
+| [ / ] | sound 50 ms earlier / later (saved), for TVs that delay the picture |
 | Shift+N / Shift+P | next / previous video |
 | Esc | leave fullscreen, then back to the grid |
 | / | search box |

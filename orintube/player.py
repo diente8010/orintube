@@ -80,7 +80,7 @@ VIDEO_CHAIN = (
     "queue ! h264parse ! nvv4l2decoder num-extra-surfaces=6 "
     "! nv3dsink name=video_sink enable-last-sample=false"
 )
-AUDIO_CHAIN = "queue ! audioconvert ! audioresample ! volume name=volume ! alsasink"
+AUDIO_CHAIN = "queue ! audioconvert ! audioresample ! volume name=volume ! alsasink name=audio_sink"
 
 # Separate playlists: video (MPEG-TS) and audio (ID3-tagged ADTS AAC, hence decodebin).
 PIPELINE_DESCRIPTION = (
@@ -116,6 +116,7 @@ class VideoPlayer:
         self._video_sink_ready = False
         self.volume_fraction = 1.0
         self.muted = False
+        self.audio_delay_ms = 0
         self._poll_source_id = None
         self._last_position_s = None
         self._seconds_without_progress = 0.0
@@ -194,6 +195,7 @@ class VideoPlayer:
         # (see PIPELINE_DESCRIPTION) neither problem happens, so nothing is overridden.
         self.pipeline = pipeline
         self._apply_volume()
+        self._apply_audio_delay()
         self._last_position_s = None
         self._seconds_without_progress = 0.0
         self._control_thread.submit(pipeline.set_state, Gst.State.PLAYING)
@@ -259,6 +261,18 @@ class VideoPlayer:
         self.volume_fraction = min(1.0, max(0.0, fraction))
         self._apply_volume()
 
+    def set_audio_delay(self, delay_ms):
+        """Hold the sound back by `delay_ms` milliseconds (negative = earlier). Kept across videos.
+
+        2026-10-22 (user: "the audio is about a half second faster than the video"): inside
+        GStreamer both arrive on time (av_lateness.py: video 16 ms, audio 23 ms early), and
+        sound and picture both go to the display over HDMI/DP; TVs often delay the picture
+        for processing without delaying the sound. Like VLC and mpv, the app lets the
+        viewer shift the sound; it is applied as the audio sink's ts-offset.
+        """
+        self.audio_delay_ms = int(delay_ms)
+        self._apply_audio_delay()
+
     def toggle_mute(self):
         """Mute or unmute without losing the volume setting. Returns True when now muted."""
         self.muted = not self.muted
@@ -303,6 +317,11 @@ class VideoPlayer:
             return
         flags = Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT
         pipeline.seek_simple(Gst.Format.TIME, flags, position_ns)
+
+    def _apply_audio_delay(self):
+        """Push the audio delay into the audio sink, if a video is loaded."""
+        if self.pipeline is not None:
+            self.pipeline.get_by_name("audio_sink").set_property("ts-offset", self.audio_delay_ms * Gst.MSECOND)
 
     def _apply_volume(self):
         """Push the volume/mute setting into the pipeline's volume element, if a video is loaded."""
