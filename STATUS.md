@@ -144,6 +144,18 @@ What changed and why, with the evidence:
   a message. orintube/log.py writes ~/.cache/orintube/orintube.log (GStreamer debug detail, lookup
   failures, reconnects). recover_check.py: injected errors 1 and 2 recovered at ~2:00, error 3 gave up.
 
+## 2026-10-25: live streams use one combined playlist
+- User, on live streams: the sound "gets there then stays about a half or quarter second behind";
+  Chromium and VLC stay in sync on the same TV (so the TV is not delaying the picture, and the
+  +500 ms delay set on 2026-10-22 was compensating the wrong thing; reset to 0).
+- In-app checks on VOD (drift_check.py / drift_events.py: 3 min, pauses, skips) stayed constant;
+  PulseAudio debug logging for 3 min showed no underruns; buffer steady at 190 ms.
+- Live with separate video/audio playlists: each hlsdemux joins the live edge on its own timeline.
+  Now live streams use the signed-in single MPEG-TS playlist (video+audio with real PTS):
+  live_check.py measured video-minus-audio 2-4 ms over 40 s. Live start takes ~9-11 s (signed in).
+- Remaining constant audio lag on this Jetson (sound late) is compensated with the [ ] audio delay
+  (negative = earlier).
+
 ## Known limits
 - Videos that need the signed-in fallback take 12-16 s to start; after 4 s the app says so.
 - If both tries fail, the watch page offers "Watch in Chromium".

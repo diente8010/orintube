@@ -538,7 +538,10 @@ class YouTube:
         the error from the signed-in try is raised, since it is the one with more access.
         """
         try:
-            return self._get_separate_streams(video_id, max_height_px)
+            streams = self._get_separate_streams(video_id, max_height_px)
+            if streams.is_live and self.use_sign_in and still_wanted():
+                return self._prefer_single_playlist_for_live(streams, max_height_px)
+            return streams
         except Exception as signed_out_error:  # LookupError (no HLS) or any yt-dlp error
             log(f"{video_id}: signed-out lookup failed: {str(signed_out_error)[:200]}")
             if not self.use_sign_in or not still_wanted():
@@ -586,6 +589,23 @@ class YouTube:
         except ValueError:
             return []
         return parse_related_videos(initial_data, exclude_video_id=video_id)
+
+    def _prefer_single_playlist_for_live(self, separate_streams, max_height_px):
+        """For a live stream, return the signed-in playlist that carries video and audio together, if there is one.
+
+        2026-10-25 (user, on live streams: the sound "gets there then stays about a half or quarter
+        second behind"; Chromium and VLC stay in sync on the same TV): with separate video and
+        audio playlists, each hlsdemux joins the live stream on its own and starts its own
+        timeline, so the two can settle a fraction of a second apart for the whole session (VOD
+        both start at 0:00, which is why the drift checks on Big Buck Bunny never showed it).
+        A single MPEG-TS playlist carries both with their real PTS, so they cannot slip.
+        Falls back to the separate playlists when the signed-in lookup fails.
+        """
+        try:
+            return self._get_muxed_streams(separate_streams.video_id, max_height_px)
+        except Exception as error:  # sign-in or YouTube problems: the separate playlists still play
+            log(f"{separate_streams.video_id}: live single-playlist lookup failed, using separate playlists: {str(error)[:200]}")
+            return separate_streams
 
     def _get_separate_streams(self, video_id, max_height_px):
         """Try 1, signed out: separate video and audio HLS playlists. About 2 s."""
