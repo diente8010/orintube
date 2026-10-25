@@ -187,6 +187,30 @@ class EntryToVideoItemTest(unittest.TestCase):
         self.assertIsNone(entry_to_video_item({"title": "no id"}))
 
 
+class HomeMixTest(unittest.TestCase):
+    def test_one_discovery_video_after_every_two_recommendations(self):
+        from orintube.youtube import YouTube
+        youtube = YouTube(use_sign_in=False)
+        recommendations = [VideoItem(f"rec{n:08d}", f"rec {n}", "c") for n in range(6)]
+        discovery = [VideoItem(f"dis{n:08d}", f"dis {n}", "c") for n in range(3)]
+        youtube.load_feed = lambda name, start_index=0, count=24: (list(recommendations), True)
+        youtube.load_discovery = lambda start_index=0, count=24: (list(discovery), True)
+        mixed, has_more = youtube.load_home_mixed()
+        kinds = [item.video_id[:3] for item in mixed]
+        self.assertEqual(kinds, ["rec", "rec", "dis", "rec", "rec", "dis", "rec", "rec", "dis"])
+        self.assertTrue(has_more)
+
+    def test_home_survives_a_discovery_failure(self):
+        from orintube.youtube import YouTube
+        youtube = YouTube(use_sign_in=False)
+        youtube.load_feed = lambda name, start_index=0, count=24: ([VideoItem("rec00000001", "r", "c")], False)
+        def broken(start_index=0, count=24):
+            raise OSError("network down")
+        youtube.load_discovery = broken
+        mixed, has_more = youtube.load_home_mixed()
+        self.assertEqual([item.video_id for item in mixed], ["rec00000001"])
+
+
 class SettingsTest(unittest.TestCase):
     def test_round_trip_and_defaults(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -51,7 +51,9 @@ The decoders on their own (decode only, no display, same stream, CPU time per se
 
 - **Browse like YouTube:** a dark grid of thumbnails with titles, channels, view counts and
   lengths. Sections: **Home** (your recommendations), **Subscriptions**, **History**,
-  **Watch later** and **Shorts** (the newest Shorts from your subscribed channels).
+  **Watch later**, **Shorts** (the newest Shorts from your subscribed channels) and **Explore**
+  (videos from random topics, new ones every refresh, also mixed into Home so it doesn't only
+  show what you already watch).
   Scroll down to load more.
 - **Search**, or paste any YouTube link (`watch?v=`, `youtu.be/`, `shorts/`, `live/`), including
   links with a start time (`t=1m30s`).

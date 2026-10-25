@@ -156,6 +156,14 @@ What changed and why, with the evidence:
 - Remaining constant audio lag on this Jetson (sound late) is compensated with the [ ] audio delay
   (negative = earlier).
 
+## 2026-10-25: Explore and a more varied Home
+- User: "the orin feed isnt random enough. its too specific to things i watch".
+- YouTube's Trending/Explore pages now redirect home, topic channels list nothing, and the
+  signed-out home page is empty, so discovery = signed-out searches of 4 random topics from a list
+  of 42 (youtube.load_discovery): 24 videos from 23 channels in 2.8 s. Home mixes one discovery
+  video after every 2 recommendations (load_home_mixed); new Explore section is all discovery and
+  works signed out. Home paging counts recommendations only.
+
 ## Known limits
 - Videos that need the signed-in fallback take 12-16 s to start; after 4 s the app says so.
 - If both tries fail, the watch page offers "Watch in Chromium".

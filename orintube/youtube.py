@@ -39,6 +39,14 @@ Shorts:
     (26 channels) and reads each channel's Shorts tab, SHORTS_CHANNELS_PER_PAGE at a time in
     parallel (12 tabs in 3.2 s, 5 newest Shorts each), mixing the channels together.
 
+Discovery (Explore, and mixed into Home):
+    2026-10-25 (user: "the orin feed isnt random enough. its too specific to things i watch"):
+    YouTube's recommendations narrow to past viewing. Trending (/feed/trending, /feed/explore)
+    now redirects to the home page, the topic channels list nothing, and the signed-out home
+    page only says "Try searching to get started". So discovery searches DISCOVERY_TOPICS_PER_PAGE
+    random subjects from DISCOVERY_TOPICS (signed out, so unaffected by watch history) and mixes
+    the results; Home puts one of them after every HOME_DISCOVERY_EVERY recommendations.
+
 Comments (read-only):
     2026-10-19 (user: "it doesnt let you see comments or make them"): get_comments() reads the
     top COMMENT_COUNT comments with yt-dlp (2-3 s, signed out). Posting is deliberately left
@@ -64,6 +72,7 @@ What can go wrong:
 
 import json
 import os
+import random
 import re
 import threading
 import time
@@ -118,6 +127,19 @@ FEED_URLS = {
 }
 
 FEED_PAGE_SIZE = 24
+DISCOVERY_TOPICS = [
+    "space exploration", "street food", "nature documentary", "science experiment", "ancient history",
+    "stand up comedy", "live music performance", "travel vlog", "woodworking", "home renovation",
+    "car review", "animal rescue", "skateboarding", "surfing", "magic tricks", "painting time lapse",
+    "architecture", "ocean life", "astronomy", "chess", "drum cover", "jazz", "camping", "fishing",
+    "gardening", "robotics", "aviation", "trains", "inventions", "physics explained", "mythology",
+    "world cultures", "mountain biking", "photography tips", "board games", "dance performance",
+    "lego build", "survival skills", "cooking recipe", "wildlife", "volcanoes", "archaeology",
+]
+DISCOVERY_TOPICS_PER_PAGE = 4
+DISCOVERY_PER_TOPIC = 8
+DISCOVERY_MIN_DURATION_S = 60  # leave out Shorts-length clips; they have their own section
+HOME_DISCOVERY_EVERY = 2  # Home: one discovery video after every 2 recommendations
 COMMENT_COUNT = 40
 SHORTS_CHANNELS_PER_PAGE = 12
 SHORTS_PER_CHANNEL = 5
@@ -481,6 +503,49 @@ class YouTube:
             client.params["playlistend"] = start_index + count
             info = client.extract_info(FEED_URLS[feed_name], download=False)
         return _entries_to_page(info, count)
+
+    def load_discovery(self, start_index=0, count=FEED_PAGE_SIZE):
+        """Return (videos, True) from DISCOVERY_TOPICS_PER_PAGE random topics, shuffled. There is always more.
+
+        start_index and count are accepted like load_feed() but only count matters: every call
+        picks new topics. Searches run in parallel, signed out (about 2-3 s).
+        """
+        topics = random.sample(DISCOVERY_TOPICS, DISCOVERY_TOPICS_PER_PAGE)
+        with ThreadPoolExecutor(max_workers=len(topics)) as pool:
+            pages = list(pool.map(self._search_quietly, topics))
+        items = [item for page in pages for item in page
+                 if not item.is_short and (item.duration_s or 0) >= DISCOVERY_MIN_DURATION_S]
+        random.shuffle(items)
+        return items[:count], True
+
+    def _search_quietly(self, query):
+        """Search for discovery: return up to DISCOVERY_PER_TOPIC videos, or [] on any error."""
+        try:
+            items, _has_more = self.search(query, count=DISCOVERY_PER_TOPIC)
+            return items
+        except Exception as error:  # one failed topic should not empty the page
+            log(f"discovery search '{query}' failed: {str(error)[:120]}")
+            return []
+
+    def load_home_mixed(self, start_index=0, count=FEED_PAGE_SIZE):
+        """Return (videos, has_more): Home recommendations with a discovery video after every HOME_DISCOVERY_EVERY.
+
+        Raises SignInError like load_feed(). If discovery fails, Home is just the recommendations.
+        """
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            home_future = pool.submit(self.load_feed, "home", start_index, count)
+            discovery_future = pool.submit(self.load_discovery, 0, count // HOME_DISCOVERY_EVERY)
+            recommendations, has_more = home_future.result()
+            try:
+                discovery, _always = discovery_future.result()
+            except Exception:  # discovery is a bonus; never lose Home over it
+                discovery = []
+        mixed = []
+        for index, item in enumerate(recommendations, start=1):
+            mixed.append(item)
+            if index % HOME_DISCOVERY_EVERY == 0 and discovery:
+                mixed.append(discovery.pop())
+        return mixed, has_more
 
     def load_shorts(self, page_index):
         """Return (Shorts, has_more) from page `page_index` (0, 1, ...) of the subscribed channels.

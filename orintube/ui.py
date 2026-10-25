@@ -46,7 +46,7 @@ from .log import LOG_FILE, log  # noqa: E402
 from .player import VideoPlayer  # noqa: E402
 from .settings import load_settings, save_settings  # noqa: E402
 from .thumbnails import ThumbnailLoader  # noqa: E402
-from .youtube import SignInError, VideoItem, YouTube, extract_start_time_s, extract_video_id  # noqa: E402
+from .youtube import FEED_PAGE_SIZE, SignInError, VideoItem, YouTube, extract_start_time_s, extract_video_id  # noqa: E402
 
 WINDOW_WIDTH_PX = 1280
 WINDOW_HEIGHT_PX = 720
@@ -95,6 +95,7 @@ SECTIONS = [
     ("history", "History", "document-open-recent-symbolic", True),
     ("watch_later", "Watch later", "alarm-symbolic", True),
     ("shorts", "Shorts", "camera-video-symbolic", True),
+    ("explore", "Explore", "find-location-symbolic", False),
 ]
 
 # 2026-10-19 (user: "i want the same GUI as the youtube app"): a dark theme laid out like
@@ -663,7 +664,7 @@ class ViewerWindow(Gtk.Window):
             self.account_status_label.set_text(
                 f"Not signed in. Sign in to YouTube in {self.youtube.browser.name}, then choose Refresh sign-in.")
             self.section_title.set_text("Home")
-            self.set_browse_message("Search above, or sign in (account button, top right) to see your recommendations.")
+            self.set_browse_message("Search above, try Explore, or sign in (account button, top right) to see your recommendations.")
         return False
 
     def open_chromium_sign_in(self):
@@ -692,8 +693,12 @@ class ViewerWindow(Gtk.Window):
         self.browse_message.set_visible(bool(text))
 
     def open_section(self, section_id):
-        """Show a sidebar section ("home", "subscriptions", ...) from its first page."""
-        if not self.signed_in:
+        """Show a sidebar section ("home", "subscriptions", ...) from its first page.
+
+        Sections that need the sign-in do nothing while signed out; Explore always works.
+        """
+        needs_sign_in = next(sign_in for sid, _label, _icon, sign_in in SECTIONS if sid == section_id)
+        if needs_sign_in and not self.signed_in:
             return
         self.show_browse_page()
         self.section_id = section_id
@@ -750,6 +755,12 @@ class ViewerWindow(Gtk.Window):
                 items, has_more = self.youtube.search(query, start_index=start_index)
             elif section_id == "shorts":
                 items, has_more = self.youtube.load_shorts(page_index)
+            elif section_id == "explore":
+                items, has_more = self.youtube.load_discovery(start_index=start_index)
+            elif section_id == "home":
+                # Pages count recommendations only: the grid also holds the discovery videos
+                # mixed in, so its length is not the feed position.
+                items, has_more = self.youtube.load_home_mixed(start_index=page_index * FEED_PAGE_SIZE)
             else:
                 items, has_more = self.youtube.load_feed(section_id, start_index=start_index)
             GLib.idle_add(self._add_page, generation, items, has_more, None)
@@ -814,7 +825,7 @@ class ViewerWindow(Gtk.Window):
         if self.search_query is not None:
             self.show_browse_page()
             self._start_listing(self.section_title.get_text())
-        elif self.signed_in:
+        else:
             self.open_section(self.section_id)
 
     # Watching
