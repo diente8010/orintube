@@ -6,7 +6,7 @@ draws the video into the widget, and offers play/pause/seek/volume.
 
 Pipeline (one process, inside the app):
     souphttpsrc (video .m3u8) -> hlsdemux -> tsdemux -> queue -> h264parse -> nvv4l2decoder (NVDEC) -> nv3dsink
-    souphttpsrc (audio .m3u8) -> hlsdemux -> decodebin -> queue -> audioconvert -> audioresample -> volume -> alsasink
+    souphttpsrc (audio .m3u8) -> hlsdemux -> capssetter (AAC) -> aacparse -> avdec_aac -> queue -> audioconvert -> audioresample -> volume -> alsasink
   or, when one playlist carries both (signed-in streams, see youtube.py):
     souphttpsrc (.m3u8) -> hlsdemux -> tsdemux -+-> video chain as above
                                                 +-> aacparse -> avdec_aac -> audio chain as above
@@ -22,7 +22,7 @@ Why HLS and not the DASH files the old `yt` script piped through FIFOs:
     H.264 as ~5 s MPEG-TS segments that download in about 0.1 s each, and hlsdemux can seek
     in them. Test: Big Buck Bunny 1080p60 played at 29% of one core (the FIFO version: 82%).
     Audio HLS segments are raw ADTS AAC with an ID3 timestamp tag, not MPEG-TS, so
-    the audio branch uses decodebin rather than tsdemux.
+    the audio branch parses AAC directly (see PIPELINE_DESCRIPTION for why the format is fixed).
 
 Threads:
     2026-10-19: every call that can block on GStreamer (start, pause, seek, stop, expose)
@@ -84,10 +84,19 @@ VIDEO_CHAIN = (
 )
 AUDIO_CHAIN = "queue ! audioconvert ! audioresample ! volume name=volume ! alsasink name=audio_sink"
 
-# Separate playlists: video (MPEG-TS) and audio (ID3-tagged ADTS AAC, hence decodebin).
+# Separate playlists: video (MPEG-TS) and audio (ID3-tagged ADTS AAC).
+# 2026-10-30 (user's screenshot: "Internal data stream error ... The stream kept failing" on an
+# NBA highlights video): hlsdemux sniffs each audio segment's bytes to guess its format, and
+# for the segment at 624.8 s of AsAPLWibSy4 it guessed "application/ttml+xml" (subtitles), which
+# the AAC parser refused ("not-negotiated"), every time and at the same spot, so reconnecting
+# could not help. YouTube's audio playlists are always ADTS AAC, so capssetter now overrides
+# the guess (join=false: also when the guess is not audio). notneg.py then played that video
+# from 10:00 to the end (18:23) without error. aacparse skips the ID3 tag at each segment start.
+AUDIO_FORMAT = "audio/mpeg, mpegversion=(int)4, stream-format=(string)adts"
 PIPELINE_DESCRIPTION = (
     f"souphttpsrc name=video_source ! hlsdemux ! tsdemux ! {VIDEO_CHAIN} "
-    f"souphttpsrc name=audio_source ! hlsdemux ! decodebin ! {AUDIO_CHAIN}"
+    f"souphttpsrc name=audio_source ! hlsdemux ! capssetter join=false replace=true caps=\"{AUDIO_FORMAT}\" "
+    f"! aacparse ! avdec_aac ! {AUDIO_CHAIN}"
 )
 # One playlist whose MPEG-TS segments carry both H.264 and AAC (youtube.py's signed-in try).
 MUXED_PIPELINE_DESCRIPTION = (

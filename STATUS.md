@@ -164,6 +164,16 @@ What changed and why, with the evidence:
   video after every 2 recommendations (load_home_mixed); new Explore section is all discovery and
   works signed out. Home paging counts recommendations only.
 
+## 2026-10-30: audio segments wrongly detected as subtitles
+- User's screenshot: "Internal data stream error. The stream kept failing" on GRIZZLIES at TRAIL
+  BLAZERS (AsAPLWibSy4); "the video keeps getting cut out".
+- Log: hlsdemux1 (audio) "not-negotiated" at ~623 s, three times in a row (both reconnects resumed
+  just before the same spot). GST_DEBUG: hlsdemux typefound the audio segment at 624.8 s as
+  application/ttml+xml; aacparse refused it. The segment bytes were ordinary ID3 + ADTS AAC.
+- Fix: the separate-audio branch is hlsdemux ! capssetter join=false replace=true caps=AAC ! aacparse
+  ! avdec_aac (was decodebin). That video then played 10:00 to the end; player_check.py 7/7; in the
+  app it played from 10:15 past 10:24 with no error or reconnect.
+
 ## Known limits
 - Videos that need the signed-in fallback take 12-16 s to start; after 4 s the app says so.
 - If both tries fail, the watch page offers "Watch in Chromium".
