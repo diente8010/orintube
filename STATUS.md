@@ -195,3 +195,12 @@ What changed and why, with the evidence:
 - **Still open.** The signed-in lookup is broken until yt-dlp-ejs ships a fix for the new player
   (0.8.0 is the newest on PyPI). Videos with no signed-out HLS at all still fail; check with
   `pip install --user -U yt-dlp yt-dlp-ejs` later.
+
+## 2026-11-24: "This video is not available" now and then (user: "im still getting errors like this one")
+- The default signed-out lookup sometimes answered "This video is not available" for videos
+  that loaded fine minutes later (I6y7OvPW1tI, 5NKwprxpoR0), and the broken signed-in fallback
+  then showed "Requested format is not available".
+- `_extract_signed_out` now tries `SIGNED_OUT_CLIENTS` in turn: yt-dlp's default, then
+  `android_vr`, then `web_embedded`. On 2026-11-24 both extra clients listed the combined
+  1080p HLS playlists for those videos with no sign-in (ios, tv, web_safari, mweb did not).
+  Checked: all three test videos load, and the fallback works when the first client returns no HLS.

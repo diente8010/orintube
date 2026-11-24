@@ -150,6 +150,8 @@ THUMBNAIL_URL = "https://i.ytimg.com/vi/{video_id}/mqdefault.jpg"
 # loader (blank Shorts cards). oar2.jpg is the same cover as a 1080x1920 JPEG.
 SHORT_THUMBNAIL_URL = "https://i.ytimg.com/vi/{video_id}/oar2.jpg"
 WATCH_URL = "https://www.youtube.com/watch?v={video_id}"
+# yt-dlp player clients for the signed-out stream lookup, tried in order (None = yt-dlp's default set).
+SIGNED_OUT_CLIENTS = [None, ["android_vr"], ["web_embedded"]]
 
 # Cookies proving a signed-in session. LOGIN_INFO alone can be a leftover after signing out.
 SIGNED_IN_COOKIE_NAMES = {"SID", "SAPISID"}
@@ -681,15 +683,39 @@ class YouTube:
         new player), so those videos could not play at all. The combined playlist plays in
         the single-playlist pipeline, like the signed-in one.
         """
-        options = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True}
-        with yt_dlp.YoutubeDL(options) as client:
-            info = client.extract_info(WATCH_URL.format(video_id=video_id), download=False)
+        info = self._extract_signed_out(video_id)
         formats = info.get("formats") or []
         try:
             video_format, audio_format = choose_hls_formats(formats, max_height_px)
         except LookupError:
             return _make_streams(video_id, info, choose_muxed_hls_format(formats, max_height_px), None)
         return _make_streams(video_id, info, video_format, audio_format["url"])
+
+    def _extract_signed_out(self, video_id):
+        """Return yt-dlp's info (dict) for a video, signed out, trying each of SIGNED_OUT_CLIENTS in turn.
+
+        2026-11-24 (user, with a screenshot of a SpongeBob video failing: "im still getting
+        errors like this one"): the default lookup answered "This video is not available"
+        now and then for videos it loaded fine minutes later. The android_vr and
+        web_embedded clients still list the HLS playlists and need no browser sign-in.
+        Raises the last client's error when every client fails or none lists HLS.
+        """
+        last_error = None
+        for player_clients in SIGNED_OUT_CLIENTS:
+            options = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True}
+            if player_clients:
+                options["extractor_args"] = {"youtube": {"player_client": player_clients}}
+            try:
+                with yt_dlp.YoutubeDL(options) as client:
+                    info = client.extract_info(WATCH_URL.format(video_id=video_id), download=False)
+            except yt_dlp.utils.DownloadError as error:
+                last_error = error
+                log(f"{video_id}: signed-out lookup with {player_clients or 'default'} clients failed: {str(error)[:200]}")
+                continue
+            if any(str(f.get("protocol", "")).startswith("m3u8") for f in info.get("formats") or []):
+                return info
+            last_error = LookupError("no HLS stream for this video")
+        raise last_error
 
     def _get_muxed_streams(self, video_id, max_height_px):
         """Try 2, signed in, web_safari client: one HLS playlist with video and audio. About 8 s.
