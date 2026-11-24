@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install.sh: sets up OrinTube for the current user (no sudo).
 #
-# Run from the repository:  ./install.sh [--with-deno]
+# Run from the repository:  ./install.sh [--with-deno] [--with-standalone-yt-dlp]
 #
 # What it does:
 #   1. Checks the system pieces it cannot install itself (they need sudo / JetPack):
@@ -11,7 +11,11 @@
 #   3. Checks for deno (the JavaScript runtime yt-dlp-ejs needs). With --with-deno it
 #      downloads deno for this CPU from github.com/denoland/deno releases, checks its
 #      published SHA-256, and puts it in ~/.deno/bin. Without the flag it explains how.
-#   4. Links bin/orintube into ~/.local/bin (an existing file that is not a
+#   4. With --with-standalone-yt-dlp: downloads yt-dlp's standalone build (its own Python)
+#      from github.com/yt-dlp/yt-dlp releases, checks it against yt-dlp's SHA2-256SUMS, and
+#      puts it in ~/.local/share/orintube/yt-dlp. Needed for signed-in videos on Python 3.10
+#      (JetPack 6), since current yt-dlp needs 3.11. Without the flag it explains how.
+#   5. Links bin/orintube into ~/.local/bin (an existing file that is not a
 #      link is kept as <name>.bak), installs the icon and adds "OrinTube" to the app grid.
 #
 # Re-running it is safe: it updates yt-dlp and refreshes the links.
@@ -28,12 +32,16 @@ readonly ICON_DIR="$ICON_THEME_DIR/scalable/apps"
 readonly ICON_SIZES_PX="16 24 32 48 64 128 256 512"
 readonly DENO_DIR="$HOME/.deno/bin"
 readonly DENO_VERSION="v2.9.7"
+readonly STANDALONE_YT_DLP="$HOME/.local/share/orintube/yt-dlp"
+readonly YT_DLP_RELEASE_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download"
 
 WITH_DENO=false
+WITH_STANDALONE_YT_DLP=false
 for argument in "$@"; do
     case "$argument" in
         --with-deno) WITH_DENO=true ;;
-        *) echo "usage: ./install.sh [--with-deno]" >&2; exit 2 ;;
+        --with-standalone-yt-dlp) WITH_STANDALONE_YT_DLP=true ;;
+        *) echo "usage: ./install.sh [--with-deno] [--with-standalone-yt-dlp]" >&2; exit 2 ;;
     esac
 done
 
@@ -111,6 +119,38 @@ ensure_deno() {
     fi
 }
 
+install_standalone_yt_dlp() {
+    # 2026-11-24: yt-dlp 2026.11.23 (the fix for YouTube's new player) needs Python 3.11, and
+    # JetPack 6 has 3.10, so pip stays on an older yt-dlp whose signed-in lookups fail.
+    # yt-dlp's standalone build carries its own Python; youtube.py uses it when it is present.
+    # Downloads the latest release for this CPU and checks it against yt-dlp's SHA2-256SUMS.
+    local asset download_dir
+    case "$(uname -m)" in
+        aarch64) asset="yt-dlp_linux_aarch64" ;;
+        x86_64) asset="yt-dlp_linux" ;;
+        *) echo "No standalone yt-dlp for this CPU: $(uname -m)" >&2; return 1 ;;
+    esac
+    if ! $WITH_STANDALONE_YT_DLP; then
+        if [[ -x "$STANDALONE_YT_DLP" ]]; then
+            echo "Standalone yt-dlp: found ($("$STANDALONE_YT_DLP" --version)); --with-standalone-yt-dlp updates it"
+        elif ! python3 -c "import sys; sys.exit(sys.version_info < (3, 11))"; then
+            echo "This Python is older than 3.11, so videos that need your sign-in may not play."
+            echo "Run ./install.sh --with-standalone-yt-dlp to download yt-dlp's standalone $asset (about 40 MB)."
+        fi
+        return 0
+    fi
+    # Global, like DENO_DOWNLOAD_DIR: the EXIT trap must still find it.
+    YT_DLP_DOWNLOAD_DIR="$(mktemp -d)"
+    trap 'rm -rf "$YT_DLP_DOWNLOAD_DIR" "${DENO_DOWNLOAD_DIR:-}"' EXIT
+    download_dir="$YT_DLP_DOWNLOAD_DIR"
+    curl -fsSL -o "$download_dir/$asset" "$YT_DLP_RELEASE_URL/$asset"
+    curl -fsSL -o "$download_dir/SHA2-256SUMS" "$YT_DLP_RELEASE_URL/SHA2-256SUMS"
+    (cd "$download_dir" && grep " $asset\$" SHA2-256SUMS | sha256sum -c)
+    mkdir -p "$(dirname "$STANDALONE_YT_DLP")"
+    install -m 755 "$download_dir/$asset" "$STANDALONE_YT_DLP"
+    echo "Standalone yt-dlp: installed $("$STANDALONE_YT_DLP" --version)"
+}
+
 install_icons() {
     # The SVG plus PNG renders at each size in ICON_SIZES_PX (pixels), like installed apps ship.
     local size
@@ -155,5 +195,6 @@ mkdir -p "$BIN_DIR"
 check_system_pieces
 install_python_packages
 ensure_deno
+install_standalone_yt_dlp
 install_launchers
 echo "Done. Start it with: orintube   (sign in to YouTube in Chromium or Chrome for your feeds)"

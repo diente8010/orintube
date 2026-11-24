@@ -90,7 +90,7 @@ only; sudo is only needed if system packages are missing, and the installer tell
 ```bash
 git clone https://github.com/diente8010/orintube.git ~/orintube
 cd ~/orintube
-./install.sh --with-deno
+./install.sh --with-deno --with-standalone-yt-dlp
 ```
 
 `install.sh`:
@@ -98,7 +98,11 @@ cd ~/orintube
 2. installs or updates `yt-dlp` and `yt-dlp-ejs` with `pip --user`;
 3. with `--with-deno`, downloads [deno](https://deno.com) from its official GitHub releases and
    checks its published SHA-256 (yt-dlp needs a JavaScript runtime for some videos);
-4. adds the `orintube` command, the icon, and **OrinTube** to the app grid.
+4. with `--with-standalone-yt-dlp`, downloads yt-dlp's standalone build (it carries its own
+   Python) from yt-dlp's official GitHub releases and checks it against yt-dlp's published
+   SHA-256 list. Current yt-dlp needs Python 3.11 and JetPack 6 has 3.10, so without it
+   videos that need your sign-in may not play;
+5. adds the `orintube` command, the icon, and **OrinTube** to the app grid.
 
 Then open **OrinTube** from the app grid (pin it to the dock with right-click → Add to
 Favorites), or run `orintube` or `orintube <youtube-link>`.
@@ -144,7 +148,7 @@ by YouTube or Google. It has its own name and icon and doesn't use YouTube's log
 
 **Network connections it makes:** YouTube (`youtube.com`, `googlevideo.com`) for pages and
 video, `i.ytimg.com` for thumbnails, and, only when you run `install.sh`, PyPI (for yt-dlp)
-and GitHub (for deno). Nothing else, and no analytics or telemetry.
+and GitHub (for deno and the standalone yt-dlp). Nothing else, and no analytics or telemetry.
 
 **Your responsibility:** using any third-party YouTube client may conflict with
 [YouTube's Terms of Service](https://www.youtube.com/t/terms). Use OrinTube for personal
@@ -176,9 +180,10 @@ python3 tests/smoke_ui.py /tmp                # on the Jetson: scripted run of t
 - Skips land up to ~5 s before the chosen point (YouTube's HLS segments are ~5 s long).
 - Videos that need the signed-in fallback take 12–16 s to start.
 - YouTube changes break third-party clients from time to time. Re-running `./install.sh`
-  updates yt-dlp, which usually fixes it.
-- yt-dlp has announced the end of support for Python 3.10 (JetPack 6's Python). A future
-  yt-dlp update may need Python 3.11+.
+  updates yt-dlp, which usually fixes it (`./install.sh --with-standalone-yt-dlp` also
+  updates the standalone build).
+- Since 2026.11.23, yt-dlp needs Python 3.11+, and JetPack 6 has Python 3.10. pip then keeps
+  the last yt-dlp that runs on 3.10, and signed-in lookups use the standalone build.
 
 ## License
 

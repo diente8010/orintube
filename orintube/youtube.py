@@ -67,13 +67,15 @@ What can go wrong:
     - The browser's cookie database is locked or its key is unavailable (keyring locked):
       feeds raise SignInError and the UI falls back to search only.
     - YouTube changes break yt-dlp: errors surface as yt_dlp DownloadError text.
-      Fix: pip install --user -U yt-dlp
+      Fix: pip install --user -U yt-dlp, and ./install.sh --with-standalone-yt-dlp again
+      for the standalone build (yt-dlp 2026.11.23 and later need Python 3.11).
 """
 
 import json
 import os
 import random
 import re
+import subprocess
 import threading
 import time
 import urllib.request
@@ -152,6 +154,11 @@ SHORT_THUMBNAIL_URL = "https://i.ytimg.com/vi/{video_id}/oar2.jpg"
 WATCH_URL = "https://www.youtube.com/watch?v={video_id}"
 # yt-dlp player clients for the signed-out stream lookup, tried in order (None = yt-dlp's default set).
 SIGNED_OUT_CLIENTS = [None, ["android_vr"], ["web_embedded"]]
+# yt-dlp's own standalone build (it carries its own Python), used for the signed-in stream lookup
+# when present; install.sh --with-standalone-yt-dlp puts it here. See YouTube._get_muxed_streams.
+STANDALONE_YT_DLP = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"),
+                                 "orintube", "yt-dlp")
+STANDALONE_TIMEOUT_S = 60
 
 # Cookies proving a signed-in session. LOGIN_INFO alone can be a leftover after signing out.
 SIGNED_IN_COOKIE_NAMES = {"SID", "SAPISID"}
@@ -721,7 +728,15 @@ class YouTube:
         """Try 2, signed in, web_safari client: one HLS playlist with video and audio. About 8 s.
 
         Raises SignInError when the browser's session cannot be read.
+        2026-11-24 (user, a Psalms lo-fi video failing with "Requested format is not available"):
+        YouTube's new player broke yt-dlp's JS challenge solver, so every signed-in lookup
+        came back with images only. yt-dlp 2026.11.23 fixes it but needs Python 3.11, and
+        JetPack 6 ships 3.10. So when STANDALONE_YT_DLP exists (yt-dlp's official build with
+        its own Python), the lookup runs it instead of the library.
         """
+        if os.access(STANDALONE_YT_DLP, os.X_OK):
+            info = self._extract_signed_in_standalone(video_id)
+            return _make_streams(video_id, info, choose_muxed_hls_format(info.get("formats") or [], max_height_px), None)
         with self._signed_in_stream_lock:
             if self._signed_in_stream_client is None:
                 options = {
@@ -740,6 +755,31 @@ class YouTube:
             info = self._signed_in_stream_client.extract_info(WATCH_URL.format(video_id=video_id), download=False)
         muxed_format = choose_muxed_hls_format(info.get("formats") or [], max_height_px)
         return _make_streams(video_id, info, muxed_format, None)
+
+    def _extract_signed_in_standalone(self, video_id):
+        """Run STANDALONE_YT_DLP signed in (web_safari client) and return its info (dict). About 8 s.
+
+        Raises SignInError when it cannot read the browser's cookies, yt_dlp's DownloadError
+        (with yt-dlp's last error line) on other failures.
+        """
+        browser_name, profile_dir, _, _ = self._cookie_source()
+        command = [
+            STANDALONE_YT_DLP, "-J", "--no-warnings", "--no-playlist", "--ignore-no-formats-error",
+            "--cookies-from-browser", f"{browser_name}:{profile_dir}",
+            "--extractor-args", "youtube:player_client=web_safari",
+            WATCH_URL.format(video_id=video_id),
+        ]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=STANDALONE_TIMEOUT_S)
+        except subprocess.TimeoutExpired as error:
+            raise yt_dlp.utils.DownloadError(f"yt-dlp took over {STANDALONE_TIMEOUT_S} s for this video") from error
+        error_lines = [line for line in result.stderr.splitlines() if line.startswith("ERROR")]
+        if result.returncode != 0 or not result.stdout.strip():
+            message = error_lines[-1] if error_lines else f"yt-dlp exited with {result.returncode}"
+            if "cookie" in message.lower():
+                raise SignInError(f"could not read the browser's YouTube sign-in: {message}")
+            raise yt_dlp.utils.DownloadError(message)
+        return json.loads(result.stdout)
 
 
 def _make_streams(video_id, info, video_format, audio_url):

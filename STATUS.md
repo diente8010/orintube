@@ -204,3 +204,16 @@ What changed and why, with the evidence:
   `android_vr`, then `web_embedded`. On 2026-11-24 both extra clients listed the combined
   1080p HLS playlists for those videos with no sign-in (ios, tv, web_safari, mweb did not).
   Checked: all three test videos load, and the fallback works when the first client returns no HLS.
+
+## 2026-11-24: signed-in videos (user: Psalms lo-fi video KHYYylzaIU8, "Requested format is not available")
+- That video gets "Sign in to confirm you're not a bot" from every signed-out client, so it needs
+  the signed-in lookup, which returned only storyboard images: yt-dlp-ejs 0.8.0 fails on
+  YouTube's new player (`a.addOnDisposeCallback is not a function`, yt-dlp issue #18123).
+- Fixed upstream in yt-dlp 2026.11.23, which needs Python 3.11 (JetPack 6 has 3.10; pip stays
+  on 2026.10.21, and importing 2026.11.23 on 3.10 raises ImportError).
+- user approved downloading yt-dlp's standalone ARM64 build (own Python, 41 MB, SHA-256 checked
+  against the release's SHA2-256SUMS) to ~/.local/share/orintube/yt-dlp.
+  `_get_muxed_streams` runs it (`-J`, web_safari, browser cookies) when it is there, else the
+  library as before. `install.sh --with-standalone-yt-dlp` installs or updates it.
+- Checked: KHYYylzaIU8 resolves (480p, the most web_safari offers for it) and decodes video
+  on nvv4l2decoder and AAC audio to EOS; 5NKwprxpoR0 and F8cvs98ZEJ4 still resolve at 1080p.
