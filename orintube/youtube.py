@@ -673,11 +673,22 @@ class YouTube:
             return separate_streams
 
     def _get_separate_streams(self, video_id, max_height_px):
-        """Try 1, signed out: separate video and audio HLS playlists. About 2 s."""
+        """Try 1, signed out: separate video and audio HLS playlists, else one combined playlist. About 2 s.
+
+        2026-11-23 (user: "its not loading any videos"): with yt-dlp 2026.10.21 many videos
+        signed out list only combined H.264+AAC HLS playlists (itags 91-96), no audio-only ones,
+        and the signed-in try was failing too (yt-dlp's JS challenge solver broke on YouTube's
+        new player), so those videos could not play at all. The combined playlist plays in
+        the single-playlist pipeline, like the signed-in one.
+        """
         options = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True}
         with yt_dlp.YoutubeDL(options) as client:
             info = client.extract_info(WATCH_URL.format(video_id=video_id), download=False)
-        video_format, audio_format = choose_hls_formats(info.get("formats") or [], max_height_px)
+        formats = info.get("formats") or []
+        try:
+            video_format, audio_format = choose_hls_formats(formats, max_height_px)
+        except LookupError:
+            return _make_streams(video_id, info, choose_muxed_hls_format(formats, max_height_px), None)
         return _make_streams(video_id, info, video_format, audio_format["url"])
 
     def _get_muxed_streams(self, video_id, max_height_px):

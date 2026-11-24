@@ -181,3 +181,17 @@ What changed and why, with the evidence:
 - H.264 only, up to 1080p (the screen is 1360x768).
 - Not verified: live streams in the app (the format selection was checked with a CNN-News18 live
   stream, but it was never played), and Shorts' 9:16 frame on screen.
+
+## 2026-11-23: videos stopped loading (user: "its not loading any videos", "i cant watch spongebob")
+- **Cause.** YouTube changed what it hands out. With yt-dlp 2026.08.19 the signed-out lookup got
+  no HLS at all ("Sign in to confirm you're not a bot" or DASH only), and the signed-in fallback
+  failed because yt-dlp's JS challenge solver (yt-dlp-ejs 0.8.0 + deno) errors on YouTube's new
+  player (`a.addOnDisposeCallback is not a function`), leaving only storyboard images.
+- **Fix 1.** Updated yt-dlp (2026.10.21 nightly): signed-out HLS is back. Some videos now come
+  with separate playlists again (THUNDER at HEAT, F8cvs98ZEJ4: 1080p separate).
+- **Fix 2.** Others, such as the SpongeBob compilation 5NKwprxpoR0, list only combined H.264+AAC
+  playlists (itags 91-96) signed out. `_get_separate_streams` now falls back to the combined
+  playlist instead of failing. Checked headless: 1080p, hardware decoder and AAC both decoded to EOS.
+- **Still open.** The signed-in lookup is broken until yt-dlp-ejs ships a fix for the new player
+  (0.8.0 is the newest on PyPI). Videos with no signed-out HLS at all still fail; check with
+  `pip install --user -U yt-dlp yt-dlp-ejs` later.
