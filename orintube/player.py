@@ -98,12 +98,30 @@ PIPELINE_DESCRIPTION = (
     f"souphttpsrc name=audio_source ! hlsdemux ! capssetter join=false replace=true caps=\"{AUDIO_FORMAT}\" "
     f"! aacparse ! avdec_aac ! {AUDIO_CHAIN}"
 )
+# YouTube's plain MP4 video and m4a audio files, described by a DASH manifest on disk
+# (youtube.py's _get_file_streams); the video source's location is the manifest's path.
+# 2026-11-26 (user, on an NBA game uploaded the night before: "why..."): YouTube answered 404
+# for every HLS playlist of that video, while its MP4 files worked. dashdemux reads the files
+# with range requests and seeks with their index; checked headless: play, seek to 600 s and
+# back to 60 s, video and audio timestamps within 0.01 s of each other.
+DASH_PIPELINE_DESCRIPTION = (
+    f"filesrc name=video_source ! dashdemux name=demux "
+    f"demux.video_00 ! queue ! qtdemux ! {VIDEO_CHAIN} "
+    f"demux.audio_00 ! queue ! qtdemux ! aacparse ! avdec_aac ! {AUDIO_CHAIN}"
+)
 # One playlist whose MPEG-TS segments carry both H.264 and AAC (youtube.py's signed-in try).
 MUXED_PIPELINE_DESCRIPTION = (
     f"souphttpsrc name=video_source ! hlsdemux ! tsdemux name=demux "
     f"demux. ! {VIDEO_CHAIN} "
     f"demux. ! aacparse ! avdec_aac ! {AUDIO_CHAIN}"
 )
+
+
+def pipeline_description_for(video_url, audio_url):
+    """Return the gst-launch description (str) for a video URL (or .mpd path) and audio URL (or None)."""
+    if video_url.endswith(".mpd"):
+        return DASH_PIPELINE_DESCRIPTION
+    return PIPELINE_DESCRIPTION if audio_url else MUXED_PIPELINE_DESCRIPTION
 
 
 class VideoPlayer:
@@ -156,6 +174,7 @@ class VideoPlayer:
         """Stop whatever is playing, then start the given HLS playlists (str URLs).
 
         audio_url None means the audio is inside the video playlist (MUXED_PIPELINE_DESCRIPTION).
+        A video_url ending in .mpd is a DASH manifest file on disk (DASH_PIPELINE_DESCRIPTION).
 
         The picture is stretched to fill the video widget, so the caller keeps the widget
         at the video's aspect ratio (ui.py puts it in a Gtk.AspectFrame).
@@ -179,7 +198,7 @@ class VideoPlayer:
         self._paused_snapshot = None
 
         try:
-            pipeline = Gst.parse_launch(PIPELINE_DESCRIPTION if audio_url else MUXED_PIPELINE_DESCRIPTION)
+            pipeline = Gst.parse_launch(pipeline_description_for(video_url, audio_url))
         except GLib.Error as error:
             raise RuntimeError(f"GStreamer could not build the player: {error.message}") from error
         pipeline.get_by_name("video_source").set_property("location", video_url)

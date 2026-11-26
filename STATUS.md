@@ -227,3 +227,20 @@ What changed and why, with the evidence:
   else the lookup fails over to the signed-in combined playlist.
 - Checked: pGbbg2LRLlE resolves signed in at 1080p60 and decodes video and AAC audio to EOS;
   F8cvs98ZEJ4 (separate, 1080p60) and 5NKwprxpoR0 still resolve.
+
+## 2026-11-26, later: play from the MP4 files when YouTube refuses HLS (user: "why...")
+- An hour after the fix above, pGbbg2LRLlE failed again: now its HLS video playlist and the
+  signed-in combined playlists (every itag, every client tried) answered 404 too. Its plain
+  MP4 files (itag 299 1080p60 H.264, 140 AAC; what browsers play) answered 206 at about twice
+  the needed speed. vWLULGo65pw, another new upload, showed the same.
+- Read straight over HTTP, qtdemux cannot seek in those files (push mode; seek returned
+  False). dashdemux can, using each file's sidx index, so `_get_file_streams` writes a small
+  on-demand DASH manifest to ~/.cache/orintube/manifests/<id>.mpd and player.py plays it with
+  DASH_PIPELINE_DESCRIPTION. GStreamer 1.20's dashdemux drops a BaseURL's query string
+  (YouTube then answers 404), so the URLs are written in YouTube's path form
+  (/videoplayback/key/value/..., answered 206).
+- `_get_separate_streams` now checks both the video and the audio playlist before playing;
+  on a refusal it uses the MP4 files (not for live streams), else a combined playlist.
+- Checked headless with the real pipeline: pGbbg2LRLlE 1080p60 plays, seeks to 600 s and
+  back to 60 s, video and audio timestamps within 0.01 s. Big Buck Bunny and F8cvs98ZEJ4
+  still use separate HLS (about 4.7 s to resolve). 35 unit tests pass.

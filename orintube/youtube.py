@@ -71,6 +71,7 @@ What can go wrong:
       for the standalone build (yt-dlp 2026.11.23 and later need Python 3.11).
 """
 
+import dataclasses
 import json
 import os
 import random
@@ -79,9 +80,11 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from xml.sax.saxutils import escape as xml_escape
 
 import yt_dlp
 
@@ -161,6 +164,9 @@ STANDALONE_YT_DLP = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expa
                                  "orintube", "yt-dlp")
 STANDALONE_TIMEOUT_S = 60
 PLAYLIST_CHECK_TIMEOUT_S = 5
+MP4_HEAD_BYTES = 64 * 1024  # enough for the header and index of a ~1 h DASH MP4 file
+# DASH manifests written for videos played from their MP4 files (see YouTube._get_file_streams).
+MANIFEST_DIR = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "orintube", "manifests")
 
 # Cookies proving a signed-in session. LOGIN_INFO alone can be a leftover after signing out.
 SIGNED_IN_COOKIE_NAMES = {"SID", "SAPISID"}
@@ -410,6 +416,94 @@ def choose_muxed_hls_format(formats, max_height_px):
     if not muxed:
         raise LookupError(f"no H.264 stream at or below {max_height_px}p for this video")
     return max(muxed, key=lambda f: (quality_px(f), f.get("fps") or 0, audio_language_rank(f), f.get("tbr") or 0))
+
+
+def choose_video_file_format(formats, max_height_px):
+    """Pick the tallest H.264 MP4 video file (plain HTTPS) at or below max_height_px, or None."""
+    files = [
+        f for f in formats
+        if f.get("protocol") == "https" and f.get("ext") == "mp4" and f.get("acodec") in (None, "none")
+        and str(f.get("vcodec") or "").startswith("avc1") and quality_px(f) <= max_height_px
+    ]
+    if not files:
+        return None
+    return max(files, key=lambda f: (quality_px(f), f.get("fps") or 0, f.get("tbr") or 0))
+
+
+def path_style_url(url):
+    """Rewrite a googlevideo URL's query into its path: .../videoplayback/key/value/... (str).
+
+    GStreamer 1.20's dashdemux drops the query string of a BaseURL, so YouTube answered 404
+    (2026-11-26). YouTube's own DASH manifests use this path form, and it answers 206 to it.
+    """
+    parts = urllib.parse.urlsplit(url)
+    query_path = "".join(f"/{key}/{urllib.parse.quote(value, safe='')}"
+                         for key, value in urllib.parse.parse_qsl(parts.query, keep_blank_values=True))
+    return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}{query_path}"
+
+
+def mp4_index_ranges(head):
+    """Return (init_end, index_start, index_end), byte offsets, from the first bytes (bytes) of a DASH MP4.
+
+    init_end: last byte of the ftyp + moov header. index: the sidx box. Raises ValueError
+    when `head` does not contain both.
+    """
+    boxes, offset = {}, 0
+    while offset + 8 <= len(head):
+        size = int.from_bytes(head[offset:offset + 4], "big")
+        if size < 8:
+            break
+        boxes.setdefault(head[offset + 4:offset + 8], (offset, offset + size - 1))
+        offset += size
+    if b"moov" not in boxes or b"sidx" not in boxes or boxes[b"sidx"][1] >= len(head):
+        raise ValueError("MP4 header or index not found at the start of the file")
+    return boxes[b"moov"][1], boxes[b"sidx"][0], boxes[b"sidx"][1]
+
+
+def read_mp4_index_ranges(url):
+    """Fetch the start of a DASH MP4 file (str URL) and return mp4_index_ranges() for it. About 0.2 s."""
+    request = urllib.request.Request(url, headers={"Range": f"bytes=0-{MP4_HEAD_BYTES - 1}"})
+    with urllib.request.urlopen(request, timeout=PLAYLIST_CHECK_TIMEOUT_S) as response:
+        return mp4_index_ranges(response.read())
+
+
+def dash_representation(file_format, init_end, index_start, index_end):
+    """Return one <AdaptationSet> (str) for a yt-dlp MP4 file format and its byte ranges."""
+    is_video = file_format.get("vcodec") not in (None, "none")
+    kind = "video" if is_video else "audio"
+    codecs = file_format.get("vcodec") if is_video else file_format.get("acodec")
+    size = f' width="{file_format.get("width") or 0}" height="{file_format.get("height") or 0}"' if is_video else ""
+    bandwidth = int((file_format.get("tbr") or file_format.get("abr") or 1000) * 1000)
+    return (f'<AdaptationSet mimeType="{kind}/mp4">'
+            f'<Representation id="{kind}" codecs="{xml_escape(str(codecs))}" bandwidth="{bandwidth}"{size}>'
+            f'<BaseURL>{xml_escape(path_style_url(file_format["url"]))}</BaseURL>'
+            f'<SegmentBase indexRange="{index_start}-{index_end}"><Initialization range="0-{init_end}"/></SegmentBase>'
+            f'</Representation></AdaptationSet>')
+
+
+def build_dash_manifest(duration_s, *adaptation_sets):
+    """Return a static (on-demand) DASH manifest (str) of `duration_s` seconds holding the given AdaptationSets."""
+    return ('<?xml version="1.0" encoding="UTF-8"?>'
+            '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" minBufferTime="PT2S" '
+            f'mediaPresentationDuration="PT{float(duration_s):.3f}S" '
+            'profiles="urn:mpeg:dash:profile:isoff-on-demand:2011">'
+            f'<Period>{"".join(adaptation_sets)}</Period></MPD>')
+
+
+def choose_audio_file_format(formats):
+    """Pick the AAC audio file (m4a over plain HTTPS, itag 140 and its dubbed copies) to play, or None.
+
+    Same language order as the HLS audio (see audio_language_rank). Used with
+    choose_video_file_format() when YouTube refuses the HLS playlists.
+    """
+    files = [
+        f for f in formats
+        if f.get("protocol") == "https" and f.get("vcodec") == "none"
+        and str(f.get("acodec") or "").startswith("mp4a") and f.get("ext") == "m4a"
+    ]
+    if not files:
+        return None
+    return max(files, key=lambda f: (audio_language_rank(f), f.get("abr") or 0))
 
 
 def choose_hls_formats(formats, max_height_px):
@@ -698,14 +792,45 @@ class YouTube:
             video_format, audio_format = choose_hls_formats(formats, max_height_px)
         except LookupError:
             return _make_streams(video_id, info, choose_muxed_hls_format(formats, max_height_px), None)
-        if not _playlist_answers(audio_format["url"]):
+        refused = [f["format_id"] for f in (video_format, audio_format) if not _playlist_answers(f["url"])]
+        if refused:
             # 2026-11-26 (user, NBA game pGbbg2LRLlE failing with "Not Found": "why is this still
-            # happening"): signed out, YouTube listed 21 audio playlists for it and answered 404
-            # for every one, while the video playlist worked. The player then failed three times
-            # before giving up. The signed-in combined playlist played it at 1080p60.
-            log(f"{video_id}: signed-out audio playlist {audio_format['format_id']} is refused")
+            # happening", then "why..."): YouTube listed HLS playlists for that day-old upload
+            # and answered 404 for them: first all 21 audio playlists, an hour later the video
+            # and the combined playlists too, signed in and out. Its plain MP4 files (what
+            # browsers play) kept working. The player used to fail three times, then give up.
+            log(f"{video_id}: signed-out HLS playlists {', '.join(refused)} are refused")
+            if not info.get("is_live"):
+                try:
+                    return self._get_file_streams(video_id, info, max_height_px)
+                except (LookupError, OSError, ValueError) as error:
+                    log(f"{video_id}: MP4 file fallback failed: {error}")
             return _make_streams(video_id, info, choose_muxed_hls_format(formats, max_height_px), None)
         return _make_streams(video_id, info, video_format, audio_format["url"])
+
+    def _get_file_streams(self, video_id, info, max_height_px):
+        """Play YouTube's plain MP4 video and m4a audio files through a DASH manifest written to disk.
+
+        GStreamer cannot seek in these files read straight over HTTP (qtdemux in push mode
+        refused every seek on 2026-11-26), but dashdemux can, using each file's own index
+        (sidx box), as browsers do. Streams.video_url is then the manifest's path.
+        Raises LookupError when there is no H.264 file or no AAC file.
+        """
+        formats = info.get("formats") or []
+        video_file = choose_video_file_format(formats, max_height_px)
+        audio_file = choose_audio_file_format(formats)
+        if video_file is None or audio_file is None:
+            raise LookupError("no H.264 + AAC MP4 files for this video")
+        manifest = build_dash_manifest(
+            info.get("duration") or 0,
+            dash_representation(video_file, *read_mp4_index_ranges(video_file["url"])),
+            dash_representation(audio_file, *read_mp4_index_ranges(audio_file["url"])))
+        os.makedirs(MANIFEST_DIR, exist_ok=True)
+        manifest_path = os.path.join(MANIFEST_DIR, f"{video_id}.mpd")
+        with open(manifest_path, "w") as manifest_file:
+            manifest_file.write(manifest)
+        streams = _make_streams(video_id, info, video_file, None)
+        return dataclasses.replace(streams, video_url=manifest_path)
 
     def _extract_signed_out(self, video_id):
         """Return yt-dlp's info (dict) for a video, signed out, trying each of SIGNED_OUT_CLIENTS in turn.

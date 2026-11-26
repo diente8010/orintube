@@ -18,7 +18,10 @@ from orintube.ui import format_duration, format_views, secondary_line  # noqa: E
 from orintube.youtube import (  # noqa: E402
     KNOWN_BROWSERS, VideoItem, choose_hls_formats, choose_muxed_hls_format, entry_to_video_item,
     comment_from_entry, extract_start_time_s, extract_video_id, find_browser, parse_clock_duration,
-    parse_related_videos, parse_short_count)
+    parse_related_videos, parse_short_count, choose_video_file_format, choose_audio_file_format,
+    path_style_url, mp4_index_ranges, dash_representation, build_dash_manifest)
+from orintube.player import (  # noqa: E402
+    DASH_PIPELINE_DESCRIPTION, MUXED_PIPELINE_DESCRIPTION, PIPELINE_DESCRIPTION, pipeline_description_for)
 
 
 def hls(format_id, vcodec, height=None, fps=None, tbr=None, note=None):
@@ -279,3 +282,62 @@ class FormattingTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def box(kind, size):
+    """Build one MP4 box header of `size` bytes (padded with zeros) for mp4_index_ranges tests."""
+    return size.to_bytes(4, "big") + kind + bytes(size - 8)
+
+
+class Mp4FileFallbackTest(unittest.TestCase):
+    """2026-11-26: YouTube refused every HLS playlist of a new upload; its MP4 files play through DASH."""
+
+    FILES = [
+        {"format_id": "137", "protocol": "https", "ext": "mp4", "vcodec": "avc1.640028", "acodec": "none",
+         "height": 1080, "width": 1920, "fps": 30, "tbr": 4000, "url": "https://g/videoplayback?itag=137"},
+        {"format_id": "299", "protocol": "https", "ext": "mp4", "vcodec": "avc1.64002a", "acodec": "none",
+         "height": 1080, "width": 1920, "fps": 60, "tbr": 5270, "url": "https://g/videoplayback?itag=299"},
+        {"format_id": "248", "protocol": "https", "ext": "webm", "vcodec": "vp9", "acodec": "none",
+         "height": 1080, "fps": 60, "url": "https://g/vp9"},
+        {"format_id": "136", "protocol": "https", "ext": "mp4", "vcodec": "avc1.4d401f", "acodec": "none",
+         "height": 720, "fps": 30, "url": "https://g/136"},
+        {"format_id": "140-0", "protocol": "https", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2",
+         "format_note": "Deutsch - dubbed-auto", "language": "de", "abr": 129, "url": "https://g/de"},
+        {"format_id": "140-1", "protocol": "https", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2",
+         "format_note": "English original (default)", "language": "en-US", "language_preference": 10,
+         "abr": 129, "url": "https://g/en"},
+    ]
+
+    def test_picks_tallest_h264_file_and_original_audio(self):
+        self.assertEqual(choose_video_file_format(self.FILES, 1080)["format_id"], "299")
+        self.assertEqual(choose_video_file_format(self.FILES, 720)["format_id"], "136")
+        self.assertIsNone(choose_video_file_format(self.FILES, 360))
+        self.assertEqual(choose_audio_file_format(self.FILES)["format_id"], "140-1")
+
+    def test_path_style_url_moves_the_query_into_the_path(self):
+        url = "https://rr3.googlevideo.com/videoplayback?expire=17&sig=AB%3D%3D&mime=audio%2Fmp4"
+        self.assertEqual(path_style_url(url),
+                         "https://rr3.googlevideo.com/videoplayback/expire/17/sig/AB%3D%3D/mime/audio%2Fmp4")
+
+    def test_index_ranges_from_the_file_start(self):
+        head = box(b"ftyp", 28) + box(b"moov", 713) + box(b"sidx", 2312) + box(b"moof", 100)
+        self.assertEqual(mp4_index_ranges(head), (740, 741, 3052))
+        with self.assertRaises(ValueError):
+            mp4_index_ranges(head[:2000])  # sidx cut off
+
+    def test_manifest_is_valid_xml_with_both_streams(self):
+        import xml.etree.ElementTree as ElementTree
+        video = dash_representation(self.FILES[1], 740, 741, 3052)
+        audio = dash_representation(self.FILES[5], 600, 601, 1500)
+        root = ElementTree.fromstring(build_dash_manifest(1074.5, video, audio))
+        namespace = "{urn:mpeg:dash:schema:mpd:2011}"
+        self.assertEqual(root.get("mediaPresentationDuration"), "PT1074.500S")
+        bases = [element.text for element in root.iter(f"{namespace}BaseURL")]
+        self.assertEqual(bases, ["https://g/videoplayback/itag/299", "https://g/en"])
+        ranges = [element.get("indexRange") for element in root.iter(f"{namespace}SegmentBase")]
+        self.assertEqual(ranges, ["741-3052", "601-1500"])
+
+    def test_pipeline_choice(self):
+        self.assertIs(pipeline_description_for("/cache/x.mpd", None), DASH_PIPELINE_DESCRIPTION)
+        self.assertIs(pipeline_description_for("https://m/hls_playlist/a", "https://m/hls_playlist/b"), PIPELINE_DESCRIPTION)
+        self.assertIs(pipeline_description_for("https://m/hls_playlist/a", None), MUXED_PIPELINE_DESCRIPTION)
