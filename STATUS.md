@@ -217,3 +217,13 @@ What changed and why, with the evidence:
   library as before. `install.sh --with-standalone-yt-dlp` installs or updates it.
 - Checked: KHYYylzaIU8 resolves (480p, the most web_safari offers for it) and decodes video
   on nvv4l2decoder and AAC audio to EOS; 5NKwprxpoR0 and F8cvs98ZEJ4 still resolve at 1080p.
+
+## 2026-11-26: "Not Found" on an NBA game (user: "why is this still happening")
+- pGbbg2LRLlE (SPURS at TRAIL BLAZERS): signed out, YouTube listed 21 audio playlists (20
+  auto-dubs + the original) and answered 404 for every one; the video playlist answered 200.
+  The player failed three times ("The stream kept failing") before giving up.
+- `_get_separate_streams` now fetches the chosen audio playlist first (`_playlist_answers`,
+  about 0.2 s). On an HTTP error it uses a signed-out combined playlist if there is one,
+  else the lookup fails over to the signed-in combined playlist.
+- Checked: pGbbg2LRLlE resolves signed in at 1080p60 and decodes video and AAC audio to EOS;
+  F8cvs98ZEJ4 (separate, 1080p60) and 5NKwprxpoR0 still resolve.

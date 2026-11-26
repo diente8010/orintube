@@ -78,6 +78,7 @@ import re
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -159,6 +160,7 @@ SIGNED_OUT_CLIENTS = [None, ["android_vr"], ["web_embedded"]]
 STANDALONE_YT_DLP = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"),
                                  "orintube", "yt-dlp")
 STANDALONE_TIMEOUT_S = 60
+PLAYLIST_CHECK_TIMEOUT_S = 5
 
 # Cookies proving a signed-in session. LOGIN_INFO alone can be a leftover after signing out.
 SIGNED_IN_COOKIE_NAMES = {"SID", "SAPISID"}
@@ -696,6 +698,13 @@ class YouTube:
             video_format, audio_format = choose_hls_formats(formats, max_height_px)
         except LookupError:
             return _make_streams(video_id, info, choose_muxed_hls_format(formats, max_height_px), None)
+        if not _playlist_answers(audio_format["url"]):
+            # 2026-11-26 (user, NBA game pGbbg2LRLlE failing with "Not Found": "why is this still
+            # happening"): signed out, YouTube listed 21 audio playlists for it and answered 404
+            # for every one, while the video playlist worked. The player then failed three times
+            # before giving up. The signed-in combined playlist played it at 1080p60.
+            log(f"{video_id}: signed-out audio playlist {audio_format['format_id']} is refused")
+            return _make_streams(video_id, info, choose_muxed_hls_format(formats, max_height_px), None)
         return _make_streams(video_id, info, video_format, audio_format["url"])
 
     def _extract_signed_out(self, video_id):
@@ -797,6 +806,21 @@ def _make_streams(video_id, info, video_format, audio_url):
         fps=video_format.get("fps") or 0,
         aspect=_aspect_of(video_format),
     )
+
+
+def _playlist_answers(url):
+    """Return True when an HLS playlist URL (str) can be fetched (about 0.2 s), False on an HTTP error.
+
+    Network trouble (no answer within PLAYLIST_CHECK_TIMEOUT_S) also counts as True: the
+    player's own reconnects handle that better than switching streams.
+    """
+    try:
+        with urllib.request.urlopen(url, timeout=PLAYLIST_CHECK_TIMEOUT_S):
+            return True
+    except urllib.error.HTTPError:
+        return False
+    except OSError:
+        return True
 
 
 def _is_high_quality_audio(audio_format):
